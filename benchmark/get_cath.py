@@ -12,6 +12,7 @@ from pathlib import Path
 from sklearn import metrics
 from benchmark import config
 import string
+from subprocess import CalledProcessError
 
 def read_data(CATH_file: str) -> pd.DataFrame:
     """If CATH .csv exists, loads the DataFrame. If CATH .txt exists, makes DataFrame and saves it.
@@ -138,16 +139,48 @@ def get_sequence(series: pd.Series) -> str:
                     assembly=assembly[0]
             # convert pdb res id into sequence index,
             # some files have discontinuous residue ids so ampal.get_slice_from_res_id() does not work
+            # convert pdb res id into sequence index,
+            # some files have discontinuous residue ids so ampal.get_slice_from_res_id() does not work
             start = 0
             stop = 0
             # if nmr structure, get 1st model
             if isinstance(assembly, ampal.AmpalContainer):
                 assembly = assembly[0]
+            #run dssp
+            try:
+                tag_dssp_data(assembly)
+            except CalledProcessError:
+                print(f"dssp failed on {series.PDB}.pdb1.")
+                return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+            #some biological assemblies are broken
             try:
                 chain = assembly[series.chain]
             except KeyError:
-                return np.NaN, np.NaN, np.NaN, np.NaN
+                print(f"{series.PDB}.pdb1 is missing chain {series.chain}.")
+                return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+
+            #compatibility with evoef and leo's model, store uncommon residue index in a separate column and include regular amino acid in the sequence
+            sequence=''
+            uncommon_index=[]
+            dssp=''
             for i, residue in enumerate(chain):
+                #add dssp data, assume random structure if dssp did not return anything for this residue
+                try:
+                    dssp += residue.tags['dssp_data']['ss_definition']
+                except KeyError:
+                    dssp+=' '
+                #deal with uncommon residues
+                one_letter_code=ampal.amino_acids.get_aa_letter(residue.mol_code)
+                if one_letter_code=='X':
+                    try:
+                        uncommon_index.append(i)
+                        sequence+=ampal.amino_acids.get_aa_letter(config.UNCOMMON_RESIDUE_DICT[residue.mol_code])
+                    except KeyError:
+                        print(f"{series.PDB}.pdb1 has unrecognized amino acid {residue.mol_code}.")
+                        return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+                else:
+                    sequence+=one_letter_code
+                    
                 # deal with insertions
                 if series.start[-1].isalpha():
                     if (residue.id + residue.insertion_code) == series.start:
@@ -161,27 +194,12 @@ def get_sequence(series: pd.Series) -> str:
                 else:
                     if residue.id == series.stop:
                         stop = i
-        # remove 'X' and convert start/stop residues to list indexes
-        # Evo2EF skips unnatural amino acids but AMPAL puts 'X'. string length and start/stop index must be checked
-        filtered_sequence = "".join([x for x in chain.sequence if x != "X"])
-        filtered_fragment = "".join(
-            [x for x in chain[start : (stop + 1)].sequence if x != "X"]
-        )
-        new_start = filtered_sequence.find(filtered_fragment)
-        new_stop = new_start + len(filtered_fragment) - 1
-        try:
-            tag_dssp_data(assembly)
-            dssp = "".join(
-            [x.tags['dssp_data']['ss_definition'] for x in chain if x.id != "X"]
-            )
-        #dssp can fail on some broken residues(e.g., missing side chain)     
-        except KeyError:
-            dssp=np.NaN
-        return filtered_sequence, dssp, new_start, new_stop
-    # some pdbs are obsolete or broken, return np.NaN
+       
+        return sequence, dssp, start, stop, uncommon_index
+    # some pdbs are obsolete, return np.NaN
     else:
         print(f"{series.PDB}.pdb1 is missing.")
-        return np.NaN, np.NaN, np.NaN, np.NaN
+        return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
 
 def get_pdbs(
     df: pd.DataFrame, cls: int, arch: int = 0, topo: int = 0, homologous_sf: int = 0
@@ -242,6 +260,7 @@ def append_sequence(df: pd.DataFrame) -> pd.DataFrame:
         working_copy.loc[:, "dssp"],
         working_copy.loc[:, "start"],
         working_copy.loc[:, "stop"],
+         working_copy.loc[:, "uncommon_index"],
     ) = zip(*[get_sequence(x) for i, x in df.iterrows()])
     # remove missing entries
     working_copy.dropna(inplace=True)
@@ -483,9 +502,9 @@ def load_predictions(df: pd.DataFrame,path:str) -> pd.DataFrame:
         
         Returns
         -------
-        DataFrame with appended prediction."""
+        Dictionary with predicted sequences."""
 
-    predicted_sequences = []
+    predicted_sequences = {}
     path=Path(path)
     for i, protein in df.iterrows():
         prediction_path = path/f"{protein.PDB}{protein.chain}.txt"
@@ -493,43 +512,30 @@ def load_predictions(df: pd.DataFrame,path:str) -> pd.DataFrame:
         if prediction_path.exists() and os.path.getsize(prediction_path)>0:
             with open(prediction_path) as prediction:
                 seq = prediction.readline().split()[0]
-                if seq == '0':
+                if seq != '0':
+                    predicted_sequences[protein.PDB+protein.chain]=seq
+                else:
                     print(
                         f"{protein.PDB}{protein.chain} prediction does not exits, EvoEF2 returned 0."
                     )
-                    seq=np.NaN
-                elif len(seq) != len(protein.sequence):
-                    # assume that biological assembly is a multimer
-                    if len(seq) % len(protein.sequence) == 0:
-                        seq = seq[0 : len(protein.sequence)]    
-                    else:
-                        print(
-                            f"{protein.PDB}{protein.chain} prediction and true sequence have different length."
-                        )
-                        seq=np.NaN
         else:
             print(f"{protein.PDB}{protein.chain} prediction does not exits.")
-            seq=np.NaN
-        predicted_sequences.append(seq)
-    #avoid changing the original dataframe
-    df=df.copy()
-    df["predicted_sequences"] = predicted_sequences
-    df.dropna(inplace=True)
-    # drop empty lists
-    return df
-
+    return predicted_sequences
 
 def score(
-    df: pd.DataFrame, by_fragment: bool=True
-) -> list:
+    df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignore_uncommon=True) -> list:
     """Concatenates and scores all predicted sequences in the DataFrame.
 
     Parameters
     ----------
     df: pd.DataFrame
         DataFrame with CATH fragment info. The frame must have predicted sequence, true sequence and start/stop index of CATH fragment.
+    predictions: dict
+        Dictionary with loaded predictions.
     by_fragment: bool
         If true scores only CATH fragments, if False, scores entire chain.
+    ignore_uncommon=True
+        If True, ignores uncommon residues in accuracy calculations.
 
     Returns
     --------
@@ -538,18 +544,38 @@ def score(
     sequence=''
     prediction=''
     dssp=''
-    for i,x in df.iterrows():
+    for i,protein in df.iterrows():
+        #print(protein.PDB)
+        protein_sequence=protein.sequence
+        start=protein.start
+        stop=protein.stop
+        
         if by_fragment:
-            sequence+=x.sequence[x.start:x.stop+1]
-            prediction+=x.predicted_sequences[x.start:x.stop+1]
-            dssp+=x.dssp[x.start:x.stop+1]
+            protein_sequence=protein.sequence[start:stop+1]
+            protein_dssp=protein.dssp[start:stop+1]
+            if ignore_uncommon and protein.uncommon_index!=[]:
+                protein_sequence=''.join([x for i,x in enumerate(protein_sequence) if i+start not in protein.uncommon_index])
+                dssp=''.join([x for i,x in enumerate(dssp) if i+start not in protein.uncommon_index])
+                #get new start and stop indexes
+                start=start-(np.array(protein.uncommon_index)<start).sum()
+                stop=start+len(protein_sequence)-1
+            sequence+=protein_sequence
+            prediction+=predictions[protein.PDB+protein.chain][start:stop+1]
+            dssp+=protein_dssp
+        
         else:
-            sequence+=x.sequence
-            prediction+=x.predicted_sequences
-            dssp+=x.dssp
+            if ignore_uncommon and protein.uncommon_index!=[]:
+                #remove uncommon residues from protein sequence
+                protein_sequence=''.join([x for i,x in enumerate(protein_sequence) if i not in protein.uncommon_index])
+                dssp_sequence=''.join([x for i,x in enumerate(dssp) if i not in protein.uncommon_index])
+            sequence+=protein_sequence
+            prediction+=predictions[protein.PDB+protein.chain]
+            dssp+=dssp_sequence
+            
     sequence=np.array(list(sequence))
     prediction=np.array(list(prediction))
     dssp=np.array(list(dssp))
+
     #check if length match
     assert len(sequence)==len(prediction), 'Sequence and predicted sequence lengths are not equal.'
     sequence_recovery=metrics.accuracy_score(sequence,prediction)
@@ -563,7 +589,7 @@ def score(
     
     return sequence_recovery,similarity_score,f1,alpha,beta,loop,random
 
-def score_by_architecture(df:pd.DataFrame,by_fragment: bool=True)->pd.DataFrame:
+def score_by_architecture(df:pd.DataFrame,predictions:dict,by_fragment: bool=True,ignore_uncommon=True)->pd.DataFrame:
     """Groups the predictions by architecture and scores each separately.
 
         Parameters
@@ -582,7 +608,7 @@ def score_by_architecture(df:pd.DataFrame,by_fragment: bool=True)->pd.DataFrame:
     scores=[]
     names=[]
     for cls,arch in zip(classes,architectures):
-        scores.append(score(get_pdbs(df,cls,arch),by_fragment))
+        scores.append(score(get_pdbs(df,cls,arch),predictions,by_fragment,ignore_uncommon))
         #lookup normal names
         names.append(config.architectures[f"{cls}.{arch}"])
     score_frame=pd.DataFrame(scores,columns=['accuracy','similarity','f1','alpha','beta','struct_loops','random'],index=[classes,architectures]) 
