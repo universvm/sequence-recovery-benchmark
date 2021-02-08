@@ -491,8 +491,8 @@ def multi_Evo2EF(df: pd.DataFrame, number_of_runs: int, working_dir: str, max_pr
         P.starmap(run_Evo2EF, inputs)
 
 
-def load_predictions(df: pd.DataFrame,path:str) -> pd.DataFrame:
-    """Loads predicted sequences from .txt to CATH DataFrame, drops entries for which sequence prediction fails.
+def load_prediction_sequence(df: pd.DataFrame,path:str) -> pd.DataFrame:
+    """Loads predicted sequences from .txt to dictionary, drops entries for which sequence prediction fails.
         Parameters
         ----------
         df: pd.DataFrame
@@ -522,8 +522,41 @@ def load_predictions(df: pd.DataFrame,path:str) -> pd.DataFrame:
             print(f"{protein.PDB}{protein.chain} prediction does not exits.")
     return predicted_sequences
 
+def load_prediction_matrix(df:pd.DataFrame,path_to_dataset: str, path_to_probabilities:str)->dict:
+    """Loads predicted probabilities from .csv file to dictionary, drops entries for which sequence prediction fails.
+        Parameters
+        ----------
+        df: pd.DataFrame
+            CATH dataframe
+        path_to_dataset: str
+            Path to prediction dataset labels.
+        path_to_probabilities:str
+            Path to .csv file with probabilities.
+        
+        Returns
+        -------
+        Dictionary with predicted sequences."""
+
+    path_to_dataset=Path(path_to_dataset)
+    path_to_probabilities=Path(path_to_probabilities)
+    with open(path_to_dataset) as file:
+        labels=[x.split(',')[0] for x in file.readlines()]
+    predictions=pd.read_csv(path_to_probabilities).values
+    empty_dict={k:[] for k in df.PDB.values+df.chain.values}
+    for probability,pdb in zip(predictions,labels):
+        if pdb in empty_dict:
+            empty_dict[pdb].append(probability)
+    for protein in empty_dict:
+        empty_dict[protein]=np.array(empty_dict[protein])
+    return empty_dict
+
+def most_likely_sequence(probability_matrix) -> str:
+    acids=['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
+    most_likely_seq=[acids[x] for x in np.argmax(probability_matrix, axis=1)]
+    return ''.join(most_likely_seq)
+
 def score(
-    df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignore_uncommon=True) -> list:
+    df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignore_uncommon=False,score_sequence=False) -> list:
     """Concatenates and scores all predicted sequences in the DataFrame.
 
     Parameters
@@ -536,60 +569,82 @@ def score(
         If true scores only CATH fragments, if False, scores entire chain.
     ignore_uncommon=True
         If True, ignores uncommon residues in accuracy calculations.
+    score_sequence=False
+        True if dictionary contains sequences, False if probability matrices(matrix shape n,20).
 
     Returns
     --------
     A list with sequence recovery, similarity, f1 and secondary structure scores"""
 
     sequence=''
-    prediction=''
     dssp=''
+    if score_sequence:
+        prediction=''
+    else:
+        prediction=np.empty([0,20])
     for i,protein in df.iterrows():
-        #print(protein.PDB)
-        protein_sequence=protein.sequence
-        start=protein.start
-        stop=protein.stop
-        
-        if by_fragment:
-            protein_sequence=protein.sequence[start:stop+1]
-            protein_dssp=protein.dssp[start:stop+1]
+        if protein.PDB+protein.chain in predictions: 
+            start=protein.start
+            stop=protein.stop
+            predicted_sequence=predictions[protein.PDB+protein.chain]
+
+            #remove uncommon acids
             if ignore_uncommon and protein.uncommon_index!=[]:
-                protein_sequence=''.join([x for i,x in enumerate(protein_sequence) if i+start not in protein.uncommon_index])
-                dssp=''.join([x for i,x in enumerate(dssp) if i+start not in protein.uncommon_index])
-                #get new start and stop indexes
-                start=start-(np.array(protein.uncommon_index)<start).sum()
-                stop=start+len(protein_sequence)-1
-            sequence+=protein_sequence
-            prediction+=predictions[protein.PDB+protein.chain][start:stop+1]
-            dssp+=protein_dssp
-        
-        else:
-            if ignore_uncommon and protein.uncommon_index!=[]:
-                #remove uncommon residues from protein sequence
-                protein_sequence=''.join([x for i,x in enumerate(protein_sequence) if i not in protein.uncommon_index])
-                dssp_sequence=''.join([x for i,x in enumerate(dssp) if i not in protein.uncommon_index])
-            sequence+=protein_sequence
-            prediction+=predictions[protein.PDB+protein.chain]
-            dssp+=dssp_sequence
-            
+                protein_sequence=''.join([x for i,x in enumerate(protein.sequence) if i not in protein.uncommon_index])
+                protein_dssp=''.join([x for i,x in enumerate(protein.dssp) if i not in protein.uncommon_index])
+                #update start and stop indexes
+                start=start-(np.array(protein.uncommon_index)<=start).sum()
+                stop=stop-(np.array(protein.uncommon_index)<=stop).sum()
+            else:
+                protein_sequence=protein.sequence
+                protein_dssp=protein.dssp
+
+            #check length
+            if len(protein_sequence)!=len(predicted_sequence):
+                #prediction is multimer
+                if len(predicted_sequence)%len(protein_sequence)==0:
+                    predicted_sequence=predicted_sequence[0:len(protein_sequence)]
+                else:
+                    print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match.")
+                    continue
+
+            if by_fragment:
+                protein_sequence=protein_sequence[start:stop+1]
+                protein_dssp=protein_dssp[start:stop+1]
+                predicted_sequence=predicted_sequence[start:stop+1]
+
+            if len(protein_sequence)==len(predicted_sequence) and len(protein_sequence)==len(protein_dssp):
+                sequence+=protein_sequence
+                dssp+=protein_dssp
+                if score_sequence:
+                    prediction+=predicted_sequence    
+                else:
+                    prediction=np.concatenate([prediction,predicted_sequence],axis=0)
+            else:
+                print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match.")
+
     sequence=np.array(list(sequence))
-    prediction=np.array(list(prediction))
     dssp=np.array(list(dssp))
+    if score_sequence:        
+        prediction=np.array(list(prediction))
+        sequence_recovery=metrics.accuracy_score(sequence,prediction)
+        f1=metrics.f1_score(sequence,prediction,average='macro')
+        similarity_score=[1 if lookup_blosum62(a,b)>0 else 0 for a,b in zip(sequence,prediction)]
+        similarity_score=sum(similarity_score)/len(similarity_score)
+        alpha,beta,loop,random=secondary_score(prediction,sequence,dssp)
+        return sequence_recovery,similarity_score,f1,alpha,beta,loop,random
+    
+    else:
+        most_likely_seq=np.array(list(most_likely_sequence(prediction)))
+        sequence_recovery=metrics.accuracy_score(sequence,most_likely_seq)
+        f1=metrics.f1_score(sequence,most_likely_seq,average='macro')
+        similarity_score=[1 if lookup_blosum62(a,b)>0 else 0 for a,b in zip(sequence,most_likely_seq)]
+        similarity_score=sum(similarity_score)/len(similarity_score)
+        alpha,beta,loop,random=secondary_score(most_likely_seq,sequence,dssp)
+        return sequence_recovery,similarity_score,f1,alpha,beta,loop,random
 
-    #check if length match
-    assert len(sequence)==len(prediction), 'Sequence and predicted sequence lengths are not equal.'
-    sequence_recovery=metrics.accuracy_score(sequence,prediction)
-    
-    f1=metrics.f1_score(sequence,prediction,average='macro')
-    
-    similarity_score=[1 if lookup_blosum62(a,b)>0 else 0 for a,b in zip(sequence,prediction)]
-    similarity_score=sum(similarity_score)/len(similarity_score)
-    
-    alpha,beta,loop,random=secondary_score(prediction,sequence,dssp)
-    
-    return sequence_recovery,similarity_score,f1,alpha,beta,loop,random
 
-def score_by_architecture(df:pd.DataFrame,predictions:dict,by_fragment: bool=True,ignore_uncommon=True)->pd.DataFrame:
+def score_by_architecture(df:pd.DataFrame,predictions:dict,by_fragment: bool=True,ignore_uncommon=False,score_sequence=False)->pd.DataFrame:
     """Groups the predictions by architecture and scores each separately.
 
         Parameters
@@ -608,7 +663,7 @@ def score_by_architecture(df:pd.DataFrame,predictions:dict,by_fragment: bool=Tru
     scores=[]
     names=[]
     for cls,arch in zip(classes,architectures):
-        scores.append(score(get_pdbs(df,cls,arch),predictions,by_fragment,ignore_uncommon))
+        scores.append(score(get_pdbs(df,cls,arch),predictions,by_fragment,ignore_uncommon,score_sequence))
         #lookup normal names
         names.append(config.architectures[f"{cls}.{arch}"])
     score_frame=pd.DataFrame(scores,columns=['accuracy','similarity','f1','alpha','beta','struct_loops','random'],index=[classes,architectures]) 
