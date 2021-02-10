@@ -540,14 +540,15 @@ def load_prediction_matrix(df:pd.DataFrame,path_to_dataset: str, path_to_probabi
     path_to_dataset=Path(path_to_dataset)
     path_to_probabilities=Path(path_to_probabilities)
     with open(path_to_dataset) as file:
-        labels=[x.split(',')[0] for x in file.readlines()]
-    predictions=pd.read_csv(path_to_probabilities).values
+        labels=[(x.split(',')[0],int(x.split(',')[2])) for x in file.readlines()]
+    predictions=pd.read_csv(path_to_probabilities,header=None).values
     empty_dict={k:[] for k in df.PDB.values+df.chain.values}
     for probability,pdb in zip(predictions,labels):
-        if pdb in empty_dict:
-            empty_dict[pdb].append(probability)
+        if pdb[0] in empty_dict:
+            empty_dict[pdb[0]].append((pdb[1],probability))
+    #sort predictions into a protein sequence
     for protein in empty_dict:
-        empty_dict[protein]=np.array(empty_dict[protein])
+        empty_dict[protein]=np.array([x[1] for x in sorted(empty_dict[protein])])
     return empty_dict
 
 def most_likely_sequence(probability_matrix) -> str:

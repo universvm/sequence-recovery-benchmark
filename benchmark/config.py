@@ -285,11 +285,10 @@ blosum62 = {
 }
 
 classes = {
-    "1": "Mainly Alpha",
-    "2": "Mainly Beta",
-    "3": "Alpha Beta",
-    "4": "Few Secondary Structures",
-    "6": "Special",
+    1: "Mainly Alpha",
+    2: "Mainly Beta",
+    3: "Alpha Beta",
+    4: "Few Structures/Special",
 }
 
 architectures = {

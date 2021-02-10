@@ -5,6 +5,9 @@ from benchmark import get_cath
 import gzip
 from pathlib import Path
 import numpy as np
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 def _annotate_ampalobj_with_data_tag(
     ampal_structure,
@@ -102,3 +105,50 @@ def show_accuracy(df:pd.DataFrame, pdb:str, output:str):
     curr_annotated_structure = _annotate_ampalobj_with_data_tag(assembly,[accuracy],tags=["bfactor"])
     with open(output, "w") as f:
         f.write(curr_annotated_structure.pdb)
+
+def compare_model_accuracy(models:list,name:str,model_labels=list):
+    #plot maximum 8 models, otherwise the plot is a complete mess
+    if len(models)>8:
+        models=models[0:9]
+    colors=sns.color_palette()
+    #combine 4 and 6 to make plots nicer.
+    class_key=[1,2,3,[4,6]]
+    ratios=[models[0].loc[class_key[i]].shape[0] for i in range(len(class_key))]
+    fig, ax = plt.subplots(1,4,figsize=(50,5), gridspec_kw={'width_ratios': ratios})
+    for i in range(len(class_key)):
+        index=np.arange(0,models[0].loc[class_key[i]].shape[0])
+        for j,frame in enumerate(models):  
+            value=frame.loc[class_key[i]].accuracy.values
+            ax[i].vlines(x=index+j*0.1, ymin=0, ymax=value, color=colors[j], alpha=0.75, linewidth=2)
+            ax[i].scatter(x=index+j*0.1, y=value, s=100, color=colors[j],alpha=0.75,label=model_labels[j])
+# Title, Label, Ticks and Ylim
+        ax[i].set_title(config.classes[i+1], fontdict={'size':22})
+        ax[i].set_ylabel('Accuracy')
+        ax[i].set_xticks(index)
+        ax[i].set_xticklabels(frame.loc[class_key[i]].name, rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax[i].set_ylim(0, 1)
+        ax[i].set_xlim(-0.3,index[-1]+1)
+    plt.tight_layout()
+    plt.legend()
+    fig.savefig('CATH_'+name)
+
+    sec, ax = plt.subplots(1,1,figsize=(5,5))
+    value=[]
+    columns=['alpha','beta','struct_loops','random']
+    index=np.array([0,1,2,3])
+    for j,frame in enumerate(models):
+        for col in columns:
+            value.append(frame[col].mean())
+        ax.vlines(x=index+j*0.1, ymin=0, ymax=value, color=colors[j], alpha=0.75, linewidth=2)
+        ax.scatter(x=index+j*0.1, y=value, s=100, color=colors[j],alpha=0.75,label=model_labels[j])
+        value=[]
+# Title, Label, Ticks and Ylim
+        ax.set_title('Secondary structure', fontdict={'size':22})
+        ax.set_ylabel('Accuracy')
+        ax.set_xticks(index)
+        ax.set_xticklabels(['Helices','Sheets','Structured loops','Random'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax.set_ylim(0, 1)
+        ax.set_xlim(-0.3,index[-1]+1)
+    plt.tight_layout()
+    plt.legend()
+    sec.savefig('secondary_'+name)
