@@ -8,6 +8,7 @@ import numpy as np
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib.patches as mpatches
 
 def _annotate_ampalobj_with_data_tag(
     ampal_structure,
@@ -107,48 +108,105 @@ def show_accuracy(df:pd.DataFrame, pdb:str, output:str):
         f.write(curr_annotated_structure.pdb)
 
 def compare_model_accuracy(models:list,name:str,model_labels=list):
-    #plot maximum 8 models, otherwise the plot is a complete mess
+    #plot maximum 9 models, otherwise the plot is a complete mess
     if len(models)>8:
         models=models[0:9]
     colors=sns.color_palette()
-    #combine 4 and 6 to make plots nicer.
-    class_key=[1,2,3,[4,6]]
+    #combine 4 and 6 to make plots nicer. Works with any number of CATH classes.
+    class_key=[x[0] for x in models[0].index]
+    class_key=list(dict.fromkeys(class_key))
+    if 4 in class_key and 6 in class_key:
+        class_key=[x for x in class_key if x!=4 and x!=6]
+        class_key.append([4,6])
     ratios=[models[0].loc[class_key[i]].shape[0] for i in range(len(class_key))]
-    fig, ax = plt.subplots(1,4,figsize=(50,5), gridspec_kw={'width_ratios': ratios})
+    fig, ax = plt.subplots(2,len(class_key),figsize=(12*len(class_key),10), gridspec_kw={'width_ratios': ratios},squeeze=False)
     for i in range(len(class_key)):
         index=np.arange(0,models[0].loc[class_key[i]].shape[0])
         for j,frame in enumerate(models):  
-            value=frame.loc[class_key[i]].accuracy.values
-            ax[i].vlines(x=index+j*0.1, ymin=0, ymax=value, color=colors[j], alpha=0.75, linewidth=2)
-            ax[i].scatter(x=index+j*0.1, y=value, s=100, color=colors[j],alpha=0.75,label=model_labels[j])
+            value_accuracy=frame.loc[class_key[i]].accuracy.values
+            value_recall=frame.loc[class_key[i]].recall.values
+            ax[0][i].bar(x=index+j*0.1, height=value_accuracy, width=0.1, align='center', color=colors[j],label=model_labels[j])
+            #show top3 accuracy if it exists
+            if 'top3_accuracy' in frame:
+                value_top_three=frame.loc[class_key[i]].top3_accuracy.values
+                ax[0][i].scatter(x=index+j*0.1, y=value_top_three,marker="_", s=50, color=colors[j])
+                ax[0][i].vlines(x=index+j*0.1, ymin=0, ymax=value_top_three, color=colors[j], linewidth=2)
+            ax[1][i].bar(x=index+j*0.1, height=value_recall, width=0.1, align='center', color=colors[j])
 # Title, Label, Ticks and Ylim
-        ax[i].set_title(config.classes[i+1], fontdict={'size':22})
-        ax[i].set_ylabel('Accuracy')
-        ax[i].set_xticks(index)
-        ax[i].set_xticklabels(frame.loc[class_key[i]].name, rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
-        ax[i].set_ylim(0, 1)
-        ax[i].set_xlim(-0.3,index[-1]+1)
-    plt.tight_layout()
-    plt.legend()
-    fig.savefig('CATH_'+name)
+        ax[0][i].set_title(config.classes[i+1], fontdict={'size':22})
+        ax[1][i].set_title(config.classes[i+1], fontdict={'size':22})
+        ax[0][i].set_ylabel('Accuracy')
+        ax[1][i].set_ylabel('Recall')
+        ax[0][i].set_xticks(index)
+        ax[0][i].set_xticklabels(frame.loc[class_key[i]].name, rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax[0][i].set_ylim(0, 1)
+        ax[0][i].set_xlim(-0.3,index[-1]+1)
+        ax[1][i].set_xticks(index)
+        ax[1][i].set_xticklabels(frame.loc[class_key[i]].name, rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax[1][i].set_ylim(0, 1)
+        ax[1][i].set_xlim(-0.3,index[-1]+1)   
+    handles, labels = ax[0][0].get_legend_handles_labels()
+    fig.legend(handles,labels,loc=7,prop={'size': 8})
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.94)
+    fig.savefig(name)
 
-    sec, ax = plt.subplots(1,1,figsize=(5,5))
-    value=[]
-    columns=['alpha','beta','struct_loops','random']
+def compare_secondary_structures(model_dicts:list,name:str,model_labels=list):
+    if len(model_dicts)>8:
+        model_dicts=model_dicts[0:9]
+    colors=sns.color_palette()
+    fig, ax = plt.subplots(1,2,figsize=(10,5))
+    keys=['alpha','beta','loops','random']
     index=np.array([0,1,2,3])
-    for j,frame in enumerate(models):
-        for col in columns:
-            value.append(frame[col].mean())
-        ax.vlines(x=index+j*0.1, ymin=0, ymax=value, color=colors[j], alpha=0.75, linewidth=2)
-        ax.scatter(x=index+j*0.1, y=value, s=100, color=colors[j],alpha=0.75,label=model_labels[j])
-        value=[]
+    for j,model in enumerate(model_dicts):
+        #show accuracy
+        value=[model[k] for k in keys]
+        ax[0].bar(x=index+j*0.1, height=value, width=0.1, align='center', color=colors[j],label=model_labels[j])
+        #show top three accuracy
+        if 'alpha_three' in model:
+            value=[model[k+'_three'] for k in keys]
+            ax[0].scatter(x=index+j*0.1, y=value,marker="_", s=50, color=colors[j])
+            ax[0].vlines(x=index+j*0.1, ymin=0, ymax=value, color=colors[j], linewidth=2)
+        #show recall
+        value=[model[k+'_recall'] for k in keys]
+        ax[1].bar(x=index+j*0.1, height=value, width=0.1, align='center', color=colors[j])
 # Title, Label, Ticks and Ylim
-        ax.set_title('Secondary structure', fontdict={'size':22})
-        ax.set_ylabel('Accuracy')
-        ax.set_xticks(index)
-        ax.set_xticklabels(['Helices','Sheets','Structured loops','Random'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
-        ax.set_ylim(0, 1)
-        ax.set_xlim(-0.3,index[-1]+1)
+        fig.suptitle('Secondary structure', fontdict={'size':22})
+        ax[0].set_ylabel('Accuracy')
+        ax[0].set_xticks(index)
+        ax[0].set_xticklabels(['Helices','Sheets','Structured loops','Random'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax[0].set_ylim(0, 1)
+        ax[0].set_xlim(-0.3,index[-1]+1)
+
+        ax[1].set_ylabel('Recall')
+        ax[1].set_xticks(index)
+        ax[1].set_xticklabels(['Helices','Sheets','Structured loops','Random'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax[1].set_ylim(0, 1)
+        ax[1].set_xlim(-0.3,index[-1]+1)
     plt.tight_layout()
-    plt.legend()
-    sec.savefig('secondary_'+name)
+    fig.legend(prop={'size': 8})
+    fig.savefig(name)
+
+def plot_resolution(df,predictions,name):
+    colors=sns.color_palette()
+    #combine class 4 and 6 to simplify the graph
+    colors[6]=colors[4]
+    class_color=[colors[x] for x in df['class'].values]
+    accuracy,recall=get_cath.score_each(df,predictions)
+    resolution=get_cath.get_resolution(df)
+    corr=pd.DataFrame({0:resolution,1:recall,2:accuracy}).corr().to_numpy()
+    fig, ax=plt.subplots(1,2,figsize=[10,5])
+    ax[0].scatter(accuracy,resolution,color=class_color)
+    ax[0].set_ylabel('Resolution, A')
+    ax[0].set_xlabel('Accuracy')
+    ax[0].set_title(f"Pearson correlation: {corr[0][2]:.3f}")
+    ax[1].scatter(recall,resolution,color=class_color)
+    ax[1].set_title(f"Pearson correlation: {corr[0][1]:.3f}")
+    ax[1].set_xlabel('Recall')
+    patches=[mpatches.Patch(color=colors[x], label=config.classes[x]) for x in config.classes]
+    fig.legend(loc=1,handles=patches,prop={'size': 9})
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.87)
+    fig.savefig(name)
+
+
