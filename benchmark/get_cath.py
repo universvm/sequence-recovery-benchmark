@@ -14,6 +14,8 @@ from benchmark import config
 import string
 from subprocess import CalledProcessError
 import re
+from scipy.stats import entropy
+from benchmark import visualization
 
 def read_data(CATH_file: str) -> pd.DataFrame:
     """If CATH .csv exists, loads the DataFrame. If CATH .txt exists, makes DataFrame and saves it.
@@ -110,7 +112,7 @@ def tag_dssp_data(assembly: ampal.Assembly):
             'psi': psi
             }
 
-def get_sequence(series: pd.Series) -> str:
+def get_sequence(series: pd.Series,path_to_assemblies: Path) -> str:
     """Gets a sequence of from PDB file, CATH fragment indexes and secondary structure labels.
 
     Parameters
@@ -128,8 +130,7 @@ def get_sequence(series: pd.Series) -> str:
     -----
     Unnatural amino acids are removed"""
     
-    #path=config.PATH_TO_PDB/series.PDB[1:3]/f"pdb{series.PDB}.ent.gz"
-    path=config.PATH_TO_ASSEMBLIES/series.PDB[1:3]/f"{series.PDB}.pdb1.gz"
+    path=path_to_assemblies/series.PDB[1:3]/f"{series.PDB}.pdb1.gz"
             
     if path.exists():
         with gzip.open(path,"rb") as protein:
@@ -241,9 +242,33 @@ def get_pdbs(
     else:
         return df.loc[(df["class"] == cls)].copy()
 
+def get_resolution(df:pd.DataFrame, path_to_pdb: Path)->list:
+    """Gets resolution of each structure in DataFrame
 
-def append_sequence(df: pd.DataFrame) -> pd.DataFrame:
-    """Get sequences for all entries in the dataframe, changes start and stop from PDB resid to index number.
+    Parameters
+    ----------
+    df: pd.DataFrame
+        DataFrame with CATH fragment info.
+    
+    Returns
+    -------
+    List with resolutions."""
+
+    res=[]
+    for i,protein in df.iterrows():
+        path=path_to_pdb/protein.PDB[1:3]/f"pdb{protein.PDB}.ent.gz"
+            
+        if path.exists():
+            with gzip.open(path,"rb") as pdb:
+                pdb_text = pdb.read().decode()
+            item=re.findall("REMARK   2 RESOLUTION.*$",pdb_text,re.MULTILINE)
+            res.append(float(item[0].split()[3]))
+        else:
+            res.append(np.NaN)
+    return res
+
+def append_sequence(df: pd.DataFrame, path_to_assemblies:Path,path_to_pdb:Path) -> pd.DataFrame:
+    """Get sequences for all entries in the dataframe, changes start and stop from PDB resid to index number,adds resolution of each chain.
 
     Parameters
     ----------
@@ -261,12 +286,14 @@ def append_sequence(df: pd.DataFrame) -> pd.DataFrame:
         working_copy.loc[:, "start"],
         working_copy.loc[:, "stop"],
          working_copy.loc[:, "uncommon_index"],
-    ) = zip(*[get_sequence(x) for i, x in df.iterrows()])
+    ) = zip(*[get_sequence(x,path_to_assemblies) for i, x in df.iterrows()])
     # remove missing entries
     working_copy.dropna(inplace=True)
     # change index from float to int
     working_copy.loc[:, "start"] = working_copy["start"].apply(int)
     working_copy.loc[:, "stop"] = working_copy["stop"].apply(int)
+    working_copy.loc[:, "resolution"]=get_resolution(working_copy,path_to_pdb)
+
     return working_copy
 
 def filter_with_TS50(df: pd.DataFrame) -> pd.DataFrame:
@@ -317,6 +344,22 @@ def filter_with_user_list(df: pd.DataFrame, path: str, ispisces:bool = False)->p
     frame_copy["PDB+chain"] = frame_copy["PDB+chain"].str.upper()
     return df.loc[frame_copy["PDB+chain"].isin(filtr)].drop_duplicates(subset=['PDB','chain'])
 
+def filter_with_resolution(df: pd.DataFrame, minimum:float, maximum:float)->pd.DataFrame:
+    """Gets DataFrame slice with chain resolution between min and max.
+
+    Parameters:
+    -----------
+    df: pd.DataFrame
+        CATH DataFrame.
+    minimum:float
+    maximum:float
+
+    Returns
+    -------
+    DataFrame with chains."""
+
+    return df[(df['resolution']>=minimum) & (df['resolution']<maximum)]
+
 def lookup_blosum62(res_true: str, res_prediction: str) -> int:
     """Returns score from the matrix.
 
@@ -336,7 +379,7 @@ def lookup_blosum62(res_true: str, res_prediction: str) -> int:
     else:
       return config.blosum62[res_prediction, res_true]
 
-def secondary_score(true_seq: np.array, predicted_seq: np.array, dssp: str, issequence:bool) -> list:
+def secondary_score(true: np.array, prediction: np.array,acid_key:list,issequence:bool) -> list:
     """Calculates sequence recovery rate for each secondary structure type.
 
     Parameters
@@ -353,23 +396,8 @@ def secondary_score(true_seq: np.array, predicted_seq: np.array, dssp: str, isse
     Returns
     -------
     List with sequence recovery for helices, beta sheets, random coils and structured loops"""
+    results=[]
 
-    true=[[],[],[],[]]
-    prediction=[[],[],[],[]]
-    for structure,truth,pred in zip(dssp,true_seq,predicted_seq):
-        if structure=="H" or structure=="I" or structure=="G":
-            true[0].append(truth)
-            prediction[0].append(pred)
-        elif structure=='E':
-            true[1].append(truth)
-            prediction[1].append(pred)
-        elif structure=="B" or structure=="T" or structure=="S":
-            true[2].append(truth)
-            prediction[2].append(pred)
-        else:
-            true[3].append(truth)
-            prediction[3].append(pred)
-        results=[]
     for seq_type in range(len(true)):
         if issequence:
             if len(true[seq_type])>0:
@@ -378,8 +406,8 @@ def secondary_score(true_seq: np.array, predicted_seq: np.array, dssp: str, isse
                 results+=[np.NaN,np.NaN]
         else:
             if len(true[seq_type])>0:
-                seq_prediction=list(most_likely_sequence(prediction[seq_type]))
-                results+=[metrics.accuracy_score(true[seq_type],seq_prediction),metrics.recall_score(true[seq_type],seq_prediction,average='macro'),metrics.top_k_accuracy_score(true[seq_type],prediction[seq_type],k=3,labels=config.acids)]
+                seq_prediction=list(most_likely_sequence(prediction[seq_type],acid_key))
+                results+=[metrics.accuracy_score(true[seq_type],seq_prediction),metrics.recall_score(true[seq_type],seq_prediction,average='macro'),metrics.top_k_accuracy_score(true[seq_type],prediction[seq_type],k=3,labels=acid_key)]
             else:
                 results+=[np.NaN,np.NaN,np.NaN]
     return results
@@ -535,34 +563,14 @@ def load_prediction_matrix(df:pd.DataFrame,path_to_dataset: str, path_to_probabi
     empty_dict={key:empty_dict[key] for key in empty_dict if len(empty_dict[key])!=0}
     return empty_dict
 
-def most_likely_sequence(probability_matrix) -> str:
+def most_likely_sequence(probability_matrix:np.array,acid_key:list) -> str:
     if len(probability_matrix)>0:
-        most_likely_seq=[config.acids[x] for x in np.argmax(probability_matrix, axis=1)]
+        most_likely_seq=[acid_key[x] for x in np.argmax(probability_matrix, axis=1)]
         return ''.join(most_likely_seq)
     else:
         return ''
 
-def score(
-    df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignore_uncommon=False,score_sequence=False) -> list:
-    """Concatenates and scores all predicted sequences in the DataFrame.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        DataFrame with CATH fragment info. The frame must have predicted sequence, true sequence and start/stop index of CATH fragment.
-    predictions: dict
-        Dictionary with loaded predictions.
-    by_fragment: bool
-        If true scores only CATH fragments, if False, scores entire chain.
-    ignore_uncommon=True
-        If True, ignores uncommon residues in accuracy calculations.
-    score_sequence=False
-        True if dictionary contains sequences, False if probability matrices(matrix shape n,20).
-
-    Returns
-    --------
-    A list with sequence recovery, similarity, f1 and secondary structure scores"""
-
+def format_sequence(df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignore_uncommon=False,score_sequence=False):
     sequence=''
     dssp=''
     if score_sequence:
@@ -614,26 +622,68 @@ def score(
     dssp=np.array(list(dssp))
     if score_sequence:        
         prediction=np.array(list(prediction))
+    #format secondary structures
+    true_secondary=[[],[],[],[]]
+    prediction_secondary=[[],[],[],[]]
+    for structure,truth,pred in zip(dssp,sequence,prediction):
+        if structure=="H" or structure=="I" or structure=="G":
+            true_secondary[0].append(truth)
+            prediction_secondary[0].append(pred)
+        elif structure=='E':
+            true_secondary[1].append(truth)
+            prediction_secondary[1].append(pred)
+        elif structure=="B" or structure=="T" or structure=="S":
+            true_secondary[2].append(truth)
+            prediction_secondary[2].append(pred)
+        else:
+            true_secondary[3].append(truth)
+            prediction_secondary[3].append(pred)
+    return sequence, prediction,dssp, true_secondary, prediction_secondary
+
+def score(
+    df: pd.DataFrame, predictions:dict, acid_key: list, by_fragment: bool=True, ignore_uncommon=False,score_sequence=False) -> list:
+    """Concatenates and scores all predicted sequences in the DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        DataFrame with CATH fragment info. The frame must have predicted sequence, true sequence and start/stop index of CATH fragment.
+    predictions: dict
+        Dictionary with loaded predictions.
+    by_fragment: bool
+        If true scores only CATH fragments, if False, scores entire chain.
+    ignore_uncommon=True
+        If True, ignores uncommon residues in accuracy calculations.
+    score_sequence=False
+        True if dictionary contains sequences, False if probability matrices(matrix shape n,20).
+
+    Returns
+    --------
+    Sequence recovery, similarity, f1 and secondary structure scores"""
+    sequence, prediction,dssp, true_secondary, prediction_secondary=format_sequence(df,predictions,by_fragment,ignore_uncommon,score_sequence)
+    
+    if score_sequence:        
+        prediction=np.array(list(prediction))
         sequence_recovery=metrics.accuracy_score(sequence,prediction)
         recall=metrics.recall_score(sequence,prediction,average='macro')
         similarity_score=[1 if lookup_blosum62(a,b)>0 else 0 for a,b in zip(sequence,prediction)]
         similarity_score=sum(similarity_score)/len(similarity_score)
-        alpha,alpha_recall,beta,beta_recall,loop,loop_recall,random,random_recall=secondary_score(prediction,sequence,dssp,True)
+        alpha,alpha_recall,beta,beta_recall,loop,loop_recall,random,random_recall=secondary_score(true_secondary, prediction_secondary,acid_key,score_sequence)
         return sequence_recovery,similarity_score,recall,alpha,alpha_recall,beta,beta_recall,loop,loop_recall,random,random_recall
     
     else:
-        most_likely_seq=np.array(list(most_likely_sequence(prediction)))
+        most_likely_seq=list(most_likely_sequence(prediction,acid_key))
         sequence_recovery=metrics.accuracy_score(sequence,most_likely_seq)
         recall=metrics.recall_score(sequence,most_likely_seq,average='macro')
         similarity_score=[1 if lookup_blosum62(a,b)>0 else 0 for a,b in zip(sequence,most_likely_seq)]
         similarity_score=sum(similarity_score)/len(similarity_score)
-        top_three_score=metrics.top_k_accuracy_score(sequence,prediction,k=3,labels=config.acids)
+        top_three_score=metrics.top_k_accuracy_score(sequence,prediction,k=3,labels=acid_key)
 
-        alpha,alpha_recall,alpha_three,beta,beta_recall,beta_three,loop,loop_recall,loop_three,random,random_recall,random_three=secondary_score(sequence,prediction,dssp,False)
+        alpha,alpha_recall,alpha_three,beta,beta_recall,beta_three,loop,loop_recall,loop_three,random,random_recall,random_three=secondary_score(true_secondary, prediction_secondary,acid_key,score_sequence)
         return sequence_recovery,top_three_score,similarity_score,recall,alpha,alpha_recall,alpha_three,beta,beta_recall,beta_three,loop,loop_recall,loop_three,random,random_recall,random_three
 
 
-def score_by_architecture(df:pd.DataFrame,predictions:dict,by_fragment: bool=True,ignore_uncommon=False,score_sequence=False)->pd.DataFrame:
+def score_by_architecture(df:pd.DataFrame,predictions:dict,acids_key:list,by_fragment: bool=True,ignore_uncommon=False,score_sequence=False)->pd.DataFrame:
     """Groups the predictions by architecture and scores each separately.
 
         Parameters
@@ -652,20 +702,20 @@ def score_by_architecture(df:pd.DataFrame,predictions:dict,by_fragment: bool=Tru
     scores=[]
     names=[]
     for cls,arch in zip(classes,architectures):
-        scores.append(score(get_pdbs(df,cls,arch),predictions,by_fragment,ignore_uncommon,score_sequence))
+        scores.append(score(get_pdbs(df,cls,arch),predictions,acids_key,by_fragment,ignore_uncommon,score_sequence))
         #lookup normal names
         names.append(config.architectures[f"{cls}.{arch}"])
     if score_sequence:
         score_frame=pd.DataFrame(scores,columns=['accuracy','similarity','recall','alpha','alpha_recall','beta','beta_recall','loops','loops_recall','random','random_recall'],index=[classes,architectures])
-        general_dict={x:y for x,y in zip(['accuracy','similarity','recall','alpha','alpha_recall','beta','beta_recall','loops','loops_recall','random','random_recall'],score(df,predictions,by_fragment,ignore_uncommon,score_sequence))}
+        general_dict={x:y for x,y in zip(['accuracy','similarity','recall','alpha','alpha_recall','beta','beta_recall','loops','loops_recall','random','random_recall'],score(df,predictions,acids_key,by_fragment,ignore_uncommon,score_sequence))}
     else:
         score_frame=pd.DataFrame(scores,columns=['accuracy','top3_accuracy','similarity','recall','alpha','alpha_recall','alpha_three','beta','beta_recall','beta_three','loops','loops_recall','loops_three','random','random_recall','random_three'],index=[classes,architectures])
-        general_dict={x:y for x,y in zip(['accuracy','top3_accuracy','similarity','recall','alpha','alpha_recall','alpha_three','beta','beta_recall','beta_three','loops','loops_recall','loops_three','random','random_recall','random_three'],score(df,predictions,by_fragment,ignore_uncommon,score_sequence))}  
+        general_dict={x:y for x,y in zip(['accuracy','top3_accuracy','similarity','recall','alpha','alpha_recall','alpha_three','beta','beta_recall','beta_three','loops','loops_recall','loops_three','random','random_recall','random_three'],score(df,predictions,acids_key,by_fragment,ignore_uncommon,score_sequence))}  
     #get meaningful names
     score_frame['name']=names
     return score_frame,general_dict
 
-def score_each(df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignore_uncommon=False,score_sequence=False) -> list:
+def score_each(df: pd.DataFrame, predictions:dict, acid_key:list, by_fragment: bool=True, ignore_uncommon=False,score_sequence=False) -> list:
     """Calculates accuracy and recall for each protein in DataFrame separately.
 
     Parameters
@@ -683,7 +733,7 @@ def score_each(df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignor
 
     Returns
     --------
-    A list with sequence recovery and recall for each protein in DataFrame"""
+    2 lists with sequence recovery and recall for each protein in DataFrame"""
     accuracy=[]
     recall=[]
     for i,protein in df.iterrows():
@@ -717,35 +767,179 @@ def score_each(df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignor
                 accuracy.append(metrics.accuracy_score(list(protein_sequence),list(predicted_sequence)))
                 recall.append(metrics.recall_score(list(protein_sequence),list(predicted_sequence),average='macro'))
             else:
-                accuracy.append(metrics.accuracy_score(list(protein_sequence),list(most_likely_sequence(predicted_sequence))))
-                recall.append(metrics.recall_score(list(protein_sequence),list(most_likely_sequence(predicted_sequence)),average='macro'))
+                accuracy.append(metrics.accuracy_score(list(protein_sequence),list(most_likely_sequence(predicted_sequence,acid_key))))
+                recall.append(metrics.recall_score(list(protein_sequence),list(most_likely_sequence(predicted_sequence,acid_key)),average='macro'))
         else:
             accuracy.append(np.NaN)
             recall.append(np.NaN)
             
-    return accuracy,recall       
+    return accuracy,recall 
 
-def get_resolution(df:pd.DataFrame)->list:
-    """Gets resolution of each structure in DataFrame
+def get_by_residue_metrics(sequence:list,prediction:np.array,acid_key: list, issequence:bool):
+    '''Calculates recall,precision and f1 for each amino acid.
+    Parameters
+    ----------
+    sequence:list
+        True sequence.
+    prediction:np.array
+        Predicted sequence, array with characters or probability matrix.
+    acid_key: list
+        '''
+    if not issequence:
+        entropy_arr=entropy(prediction, base=2, axis=1)
+        prediction=list(most_likely_sequence(prediction,acid_key))
+    else:
+        entropy_arr=np.empty(len(sequence))
+        entropy_arr[:]=np.NaN
+    #prevents crashing when not all amino acids are predicted
+    entropy_frame=pd.DataFrame(index=config.acids)
+    entropy_frame=entropy_frame.join(pd.DataFrame({'sequence':prediction,'entropy':entropy_arr}).groupby(by='sequence').mean())
+    prec,rec,f1,sup=metrics.precision_recall_fscore_support(sequence,prediction)
+    
+    entropy_frame.loc[:,'recall']=rec
+    entropy_frame.loc[:,'precision']=prec
+    entropy_frame.loc[:,'f1']=f1
+    return entropy_frame
+    
+def get_angles(protein: pd.Series)->np.array:
+    '''Gets backbone torsion agles for protein.
+  
+    Parameters
+    ----------
+        protein: pd.Series
+        Series containing protein info.
+    Returns
+    -------
+        np.array with torsion angles.'''
+  
+    path=config.PATH_TO_ASSEMBLIES/protein.PDB[1:3]/f"{protein.PDB}.pdb1.gz"
+    if path.exists():
+        with gzip.open(path,"rb") as file:
+            assembly = ampal.load_pdb(file.read().decode(), path=False)
+            #check is assembly has multiple states, pick the first
+            if isinstance(assembly,ampal.assembly.AmpalContainer):
+                if assembly[0].id.count('_state_')>0:
+                    assembly=assembly[0]
+                    # if nmr structure, get 1st model
+            if isinstance(assembly, ampal.AmpalContainer):
+                assembly = assembly[0]
+            chain = assembly[protein.chain]
+            torsion_angles=ampal.analyse_protein.measure_torsion_angles(chain)
+    return torsion_angles
+    
+def format_angle_sequence(df: pd.DataFrame, predictions:dict, by_fragment: bool=True, ignore_uncommon=False,score_sequence=False):
+    '''Gets Psi and Phi angles for all residues in predictions.
+  
 
     Parameters
     ----------
     df: pd.DataFrame
-        DataFrame with CATH fragment info.
+        DataFrame with CATH fragment info. The frame must have predicted sequence, true sequence and start/stop index of CATH fragment.
+    predictions: dict
+        Dictionary with loaded predictions.
+    by_fragment: bool
+        If true scores only CATH fragments, if False, scores entire chain.
+    ignore_uncommon=True
+        If True, ignores uncommon residues in accuracy calculations.
+    score_sequence=False
+        True if dictionary contains sequences, False if probability matrices(matrix shape n,20).
     
     Returns
     -------
-    List with resolutions."""
-
-    res=[]
+        Lists for sequence, prediction,dssp,torsion'''
+        
+    sequence=''
+    dssp=''
+    torsion=[]
+    if score_sequence:
+        prediction=''
+    else:
+        prediction=np.empty([0,20])
     for i,protein in df.iterrows():
-        path=config.PATH_TO_PDB/protein.PDB[1:3]/f"pdb{protein.PDB}.ent.gz"
-            
-        if path.exists():
-            with gzip.open(path,"rb") as pdb:
-                pdb_text = pdb.read().decode()
-            item=re.findall("REMARK   2 RESOLUTION.*$",pdb_text,re.MULTILINE)
-            res.append(float(item[0].split()[3]))
+        if protein.PDB+protein.chain in predictions: 
+            start=protein.start
+            stop=protein.stop
+            predicted_sequence=predictions[protein.PDB+protein.chain]
+            protein_angle=get_angles(protein)
+
+
+            #remove uncommon acids
+            if ignore_uncommon and protein.uncommon_index!=[]:
+                protein_sequence=''.join([x for i,x in enumerate(protein.sequence) if i not in protein.uncommon_index])
+                protein_dssp=''.join([x for i,x in enumerate(protein.dssp) if i not in protein.uncommon_index])
+                protein_angle=[x for i,x in enumerate(protein_angle) if i not in protein.uncommon_index]
+                #update start and stop indexes
+                start=start-(np.array(protein.uncommon_index)<=start).sum()
+                stop=stop-(np.array(protein.uncommon_index)<=stop).sum()
+            else:
+                protein_sequence=protein.sequence
+                protein_dssp=protein.dssp
+
+            #check length
+            if len(protein_sequence)!=len(predicted_sequence):
+                #prediction is multimer
+                if len(predicted_sequence)%len(protein_sequence)==0:
+                    predicted_sequence=predicted_sequence[0:len(protein_sequence)]
+                else:
+                    print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match.")
+                    continue
+
+            if by_fragment:
+                protein_sequence=protein_sequence[start:stop+1]
+                protein_dssp=protein_dssp[start:stop+1]
+                predicted_sequence=predicted_sequence[start:stop+1]
+                protein_angle=protein_angle[start:stop+1]
+
+            if len(protein_sequence)==len(predicted_sequence) and len(protein_sequence)==len(protein_dssp) and len(protein_angle)==len(predicted_sequence):
+                sequence+=protein_sequence
+                dssp+=protein_dssp
+                torsion+=protein_angle
+                if score_sequence:
+                    prediction+=predicted_sequence    
+                else:
+                    prediction=np.concatenate([prediction,predicted_sequence],axis=0)
+            else:
+                print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match.")
+
+    
+    return sequence, prediction,dssp,torsion
+
+def compare(df,path,dataset_map,acids_key,path_to_pdb,path_to_evoef=False,include=False,ignore_uncommon=False,by_fragment=True):
+    list_of_scores={}
+    accuracy=[]
+    list_of_models={name:load_prediction_matrix(df,dataset_map,Path(path)/name) for name in os.listdir(path) if name.split('.')[-1]=='csv'}
+    for model in list_of_models:
+        model_scores,model_dict=score_by_architecture(df,list_of_models[model],acids_key,ignore_uncommon=ignore_uncommon,by_fragment=by_fragment)
+        #make summary
+        visualization.make_model_summary(df,list_of_models[model],model_dict,acids_key,str(Path(path)/model),Path(path_to_pdb))
+        list_of_scores[model]=[model_scores,model_dict]
+        accuracy.append([model_dict['accuracy'],model])
+    #load evoef predictions and make evoef summary
+    if path_to_evoef:
+        evo_ef2=load_prediction_sequence(df,path_to_evoef)
+        evo_ef2_scores,evo_ef2_dict=score_by_architecture(df,evo_ef2,acids_key,ignore_uncommon=True,score_sequence=True)
+        visualization.make_model_summary(df,evo_ef2,evo_ef2_dict,acids_key,str(Path(path)/'EvoEF2'),Path(path_to_pdb),ignore_uncommon=True,score_sequence=True)
+    
+    accuracy=sorted(accuracy)
+    if path_to_evoef:
+        #pick 7 best models and evoef
+        filtered_models=[list_of_scores[model[1]] for model in accuracy[-7:]]
+        filtered_labels=[model[1] for model in accuracy[-7:]]
+        #add evoEF2 data
+        filtered_models.append([evo_ef2_scores,evo_ef2_dict])
+        filtered_labels.append('EvoEF2')
+    else:
+        filtered_models=[list_of_scores[model[1]] for model in accuracy[-8:]]
+        filtered_labels=[model[1] for model in accuracy[-8:]]
+    #include specified models
+    if include:
+        if len(include)<=8:
+            for index,model_name in enumerate(include):
+                if model_name not in filtered_labels:
+                    filtered_models[index]=list_of_scores[model_name]
+                    filtered_labels[index]=model_name
         else:
-            res.append(np.NaN)
-    return res
+            raise ValueError('Too many models are give to plot, select no more than 8 models.')
+            
+    visualization.compare_model_accuracy(filtered_models,filtered_labels,Path(path))
+
