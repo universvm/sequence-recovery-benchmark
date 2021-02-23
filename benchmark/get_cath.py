@@ -124,7 +124,7 @@ def get_sequence(series: pd.Series,path_to_assemblies: Path) -> str:
 
     Returns
     -------
-    If PDB exists, returns sequence, dssp sequence, and start and stop index for CATH fragment. If not, returns np.NaN
+    If PDB exists, returns sequence, dssp sequence, and start and stop index for CATH fragment.
 
     Notes
     -----
@@ -152,14 +152,12 @@ def get_sequence(series: pd.Series,path_to_assemblies: Path) -> str:
             try:
                 tag_dssp_data(assembly)
             except CalledProcessError:
-                print(f"dssp failed on {series.PDB}.pdb1.")
-                return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+                raise CalledProcessError(f"dssp failed on {series.PDB}.pdb1.")
             #some biological assemblies are broken
             try:
                 chain = assembly[series.chain]
             except KeyError:
-                print(f"{series.PDB}.pdb1 is missing chain {series.chain}.")
-                return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+                raise KeyError(f"{series.PDB}.pdb1 is missing chain {series.chain}.")
 
             #compatibility with evoef and leo's model, store uncommon residue index in a separate column and include regular amino acid in the sequence
             sequence=''
@@ -178,8 +176,7 @@ def get_sequence(series: pd.Series,path_to_assemblies: Path) -> str:
                         uncommon_index.append(i)
                         sequence+=ampal.amino_acids.get_aa_letter(config.UNCOMMON_RESIDUE_DICT[residue.mol_code])
                     except KeyError:
-                        print(f"{series.PDB}.pdb1 has unrecognized amino acid {residue.mol_code}.")
-                        return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+                        raise ValueError(f"{series.PDB}.pdb1 has unrecognized amino acid {residue.mol_code}.")
                 else:
                     sequence+=one_letter_code
                     
@@ -199,8 +196,7 @@ def get_sequence(series: pd.Series,path_to_assemblies: Path) -> str:
        
         return sequence, dssp, start, stop, uncommon_index
     else:
-        print(f"{series.PDB}.pdb1 is missing.")
-        return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+        raise FileNotFoundError(f"{series.PDB}.pdb1 is missing, download it or remove it from your dataset.")
 
 def get_pdbs(
     df: pd.DataFrame, cls: int, arch: int = 0, topo: int = 0, homologous_sf: int = 0
@@ -279,19 +275,12 @@ def append_sequence(df: pd.DataFrame, path_to_assemblies:Path,path_to_pdb:Path) 
     -------
     DataFrame with existing sequences"""
     working_copy = df.copy()
-
-    (
-        working_copy.loc[:, "sequence"],
-        working_copy.loc[:, "dssp"],
-        working_copy.loc[:, "start"],
-        working_copy.loc[:, "stop"],
-         working_copy.loc[:, "uncommon_index"],
-    ) = zip(*[get_sequence(x,path_to_assemblies) for i, x in df.iterrows()])
-    # remove missing entries
-    working_copy.dropna(inplace=True)
-    # change index from float to int
-    working_copy.loc[:, "start"] = working_copy["start"].apply(int)
-    working_copy.loc[:, "stop"] = working_copy["stop"].apply(int)
+    sequence,dssp,start,stop,uncommon_index = zip(*[get_sequence(x,path_to_assemblies) for i, x in df.iterrows()])
+    working_copy.loc[:, "sequence"]=sequence
+    working_copy.loc[:, "dssp"]=dssp
+    working_copy.loc[:, "start"]=start
+    working_copy.loc[:, "stop"]=stop
+    working_copy.loc[:, "uncommon_index"]=np.array(uncommon_index, dtype="object")
     working_copy.loc[:, "resolution"]=get_resolution(working_copy,path_to_pdb)
 
     return working_copy
@@ -401,13 +390,13 @@ def secondary_score(true: np.array, prediction: np.array,acid_key:list,issequenc
     for seq_type in range(len(true)):
         if issequence:
             if len(true[seq_type])>0:
-                 results+=[metrics.accuracy_score(true[seq_type],prediction[seq_type]),metrics.recall_score(true[seq_type],prediction[seq_type],average='macro')]
+                 results+=[metrics.accuracy_score(true[seq_type],prediction[seq_type]),metrics.recall_score(true[seq_type],prediction[seq_type],average='macro',zero_division=0)]
             else:
                 results+=[np.NaN,np.NaN]
         else:
             if len(true[seq_type])>0:
                 seq_prediction=list(most_likely_sequence(prediction[seq_type],acid_key))
-                results+=[metrics.accuracy_score(true[seq_type],seq_prediction),metrics.recall_score(true[seq_type],seq_prediction,average='macro'),metrics.top_k_accuracy_score(true[seq_type],prediction[seq_type],k=3,labels=acid_key)]
+                results+=[metrics.accuracy_score(true[seq_type],seq_prediction),metrics.recall_score(true[seq_type],seq_prediction,average='macro',zero_division=0),metrics.top_k_accuracy_score(true[seq_type],prediction[seq_type],k=3,labels=acid_key)]
             else:
                 results+=[np.NaN,np.NaN,np.NaN]
     return results
@@ -502,7 +491,7 @@ def multi_Evo2EF(df: pd.DataFrame, number_of_runs: int, working_dir: str, max_pr
 
 
 def load_prediction_sequence(df: pd.DataFrame,path:str) -> pd.DataFrame:
-    """Loads predicted sequences from .txt to dictionary, drops entries for which sequence prediction fails.
+    """Loads EvoEF2 predicted sequences from .txt to dictionary, drops entries for which sequence prediction fails.
         Parameters
         ----------
         df: pd.DataFrame
@@ -600,7 +589,7 @@ def format_sequence(df: pd.DataFrame, predictions:dict, by_fragment: bool=True, 
                 if len(predicted_sequence)%len(protein_sequence)==0:
                     predicted_sequence=predicted_sequence[0:len(protein_sequence)]
                 else:
-                    print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match.")
+                    print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match, this structure will be ignored.")
                     continue
 
             if by_fragment:
@@ -616,7 +605,7 @@ def format_sequence(df: pd.DataFrame, predictions:dict, by_fragment: bool=True, 
                 else:
                     prediction=np.concatenate([prediction,predicted_sequence],axis=0)
             else:
-                print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match.")
+                print(f"{protein.PDB}{protein.chain} sequence, predicted sequence and dssp length do not match, this structure will be ignored.")
 
     sequence=np.array(list(sequence))
     dssp=np.array(list(dssp))
@@ -665,7 +654,7 @@ def score(
     if score_sequence:        
         prediction=np.array(list(prediction))
         sequence_recovery=metrics.accuracy_score(sequence,prediction)
-        recall=metrics.recall_score(sequence,prediction,average='macro')
+        recall=metrics.recall_score(sequence,prediction,average='macro',zero_division=0)
         similarity_score=[1 if lookup_blosum62(a,b)>0 else 0 for a,b in zip(sequence,prediction)]
         similarity_score=sum(similarity_score)/len(similarity_score)
         alpha,alpha_recall,beta,beta_recall,loop,loop_recall,random,random_recall=secondary_score(true_secondary, prediction_secondary,acid_key,score_sequence)
@@ -674,7 +663,7 @@ def score(
     else:
         most_likely_seq=list(most_likely_sequence(prediction,acid_key))
         sequence_recovery=metrics.accuracy_score(sequence,most_likely_seq)
-        recall=metrics.recall_score(sequence,most_likely_seq,average='macro')
+        recall=metrics.recall_score(sequence,most_likely_seq,average='macro',zero_division=0)
         similarity_score=[1 if lookup_blosum62(a,b)>0 else 0 for a,b in zip(sequence,most_likely_seq)]
         similarity_score=sum(similarity_score)/len(similarity_score)
         top_three_score=metrics.top_k_accuracy_score(sequence,prediction,k=3,labels=acid_key)
@@ -765,10 +754,10 @@ def score_each(df: pd.DataFrame, predictions:dict, acid_key:list, by_fragment: b
                 predicted_sequence=predicted_sequence[start:stop+1]
             if score_sequence:
                 accuracy.append(metrics.accuracy_score(list(protein_sequence),list(predicted_sequence)))
-                recall.append(metrics.recall_score(list(protein_sequence),list(predicted_sequence),average='macro'))
+                recall.append(metrics.recall_score(list(protein_sequence),list(predicted_sequence),average='macro',zero_division=0))
             else:
                 accuracy.append(metrics.accuracy_score(list(protein_sequence),list(most_likely_sequence(predicted_sequence,acid_key))))
-                recall.append(metrics.recall_score(list(protein_sequence),list(most_likely_sequence(predicted_sequence,acid_key)),average='macro'))
+                recall.append(metrics.recall_score(list(protein_sequence),list(most_likely_sequence(predicted_sequence,acid_key)),average='macro',zero_division=0))
         else:
             accuracy.append(np.NaN)
             recall.append(np.NaN)

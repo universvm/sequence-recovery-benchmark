@@ -312,7 +312,6 @@ def make_model_summary(df,predictions,general_info,acids_key,name,path_to_pdb,by
     ax[0][2].set_xlim(-0.7,index[-1]+1)
     ax[0][2].axhline(0,-0.3,index[-1]+1,color='k',lw=1)
     ax[0][2].set_ylim(minimum*1.2, maximum*1.2)
-    fig.legend(loc=7,prop={'size': 7})
         
     #show resolution distribution
     colors=sns.color_palette("viridis",4)
@@ -440,19 +439,27 @@ def compare_model_accuracy(model_scores:list,model_labels:list,location:Path):
     for j,model in enumerate(model_dicts):
         #show accuracy
         value_accuracy=[model[k] for k in keys]
+
         ax_secondary[0].bar(x=index+j*0.1, height=value_accuracy, width=0.1, align='center', color=colors[j],label=model_labels[j])
+        ax_secondary[0].bar(x=4+j*0.1, height=model['accuracy'], width=0.1, align='center', color=colors[j],label=model_labels[j])
+        ax_secondary[0].text(4+j*0.1, model['accuracy']+0.3,f"{model['accuracy']:.3f}",ha='center', va='bottom',rotation='vertical',fontdict={'size':6})
         #show top three accuracy
         if 'alpha_three' in model:
             value=[model[k+'_three'] for k in keys]
             ax_secondary[0].scatter(x=index+j*0.1, y=value,marker="_", s=50, color=colors[j])
             ax_secondary[0].vlines(x=index+j*0.1, ymin=0, ymax=value, color=colors[j], linewidth=2)
+            ax_secondary[0].scatter(x=4+j*0.1, y=model['top3_accuracy'],marker="_", s=50, color=colors[j])
+            ax_secondary[0].vlines(x=4+j*0.1, ymin=0, ymax=model['top3_accuracy'], color=colors[j], linewidth=2)
         #show recall
         value_recall=[model[k+'_recall'] for k in keys]
-        ax_secondary[1].bar(x=index+j*0.1, height=value_recall, width=0.1, align='center', color=colors[j])
+        ax_secondary[1].bar(x=index+j*0.1, height=value_recall, width=0.1, align='center', color=colors[j],label=model_labels[j])
+        ax_secondary[1].bar(x=4+j*0.1, height=model['recall'], width=0.1, align='center', color=colors[j],label=model_labels[j])
+        ax_secondary[1].text(4+j*0.1, model['recall']*1.2,f"{model['recall']:.3f}",ha='center', va='bottom',rotation='vertical',fontdict={'size':6})
+
         for e,accuracy in enumerate(value_accuracy):
-            ax_secondary[0].text(index[e]+j*0.1, accuracy+0.3,f"{accuracy:.3f}",ha='center', va='bottom',rotation='vertical',fontdict={'size':7})
+            ax_secondary[0].text(index[e]+j*0.1, accuracy+0.3,f"{accuracy:.3f}",ha='center', va='bottom',rotation='vertical',fontdict={'size':6})
         for e,recall in enumerate(value_recall):
-            ax_secondary[1].text(index[e]+j*0.1, recall*1.2,f"{recall:.3f}",ha='center', va='bottom',rotation='vertical',fontdict={'size':7})
+            ax_secondary[1].text(index[e]+j*0.1, recall*1.2,f"{recall:.3f}",ha='center', va='bottom',rotation='vertical',fontdict={'size':6})
         #show difference
         difference=np.array(value_accuracy)-np.array(value_recall)
         if np.amin(difference)<minimum:
@@ -460,30 +467,31 @@ def compare_model_accuracy(model_scores:list,model_labels:list,location:Path):
         if np.amax(difference)>maximum:
             maximum=np.amax(difference)
         ax_secondary[2].bar(x=index+j*0.1, height=difference, width=0.1, align='center', color=colors[j])
-        for e,dif in enumerate(difference):
+        ax_secondary[2].bar(x=4+j*0.1, height=model['accuracy']-model['recall'], width=0.1, align='center', color=colors[j],label=model_labels[j])
+        for e,dif in enumerate(np.append(difference,model['accuracy']-model['recall'])):
             if dif<0:
                 y_coord=0
             else:
                 y_coord=dif
-            ax_secondary[2].text(index[e]+j*0.1, y_coord+0.01,f"{dif:.3f}", ha='center', va='bottom',rotation='vertical',fontdict={'size':7})
+            ax_secondary[2].text(e+j*0.1, y_coord+0.01,f"{dif:.3f}", ha='center', va='bottom',rotation='vertical',fontdict={'size':6})
 # Title, Label, Ticks and Ylim
         fig_secondary.suptitle('Secondary structure', fontdict={'size':22})
         ax_secondary[0].set_ylabel('Accuracy')
-        ax_secondary[0].set_xticks(index)
-        ax_secondary[0].set_xticklabels(['Helices','Sheets','Structured loops','Random'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax_secondary[0].set_xticks([0,1,2,3,4])
+        ax_secondary[0].set_xticklabels(['Helices','Sheets','Structured loops','Random','All structures'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
         ax_secondary[0].set_ylim(0, 1)
-        ax_secondary[0].set_xlim(-0.3,index[-1]+1)
+        ax_secondary[0].set_xlim(-0.3,5)
 
         ax_secondary[1].set_ylabel('Average Recall')
-        ax_secondary[1].set_xticks(index)
-        ax_secondary[1].set_xticklabels(['Helices','Sheets','Structured loops','Random'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax_secondary[1].set_xticks([0,1,2,3,4])
+        ax_secondary[1].set_xticklabels(['Helices','Sheets','Structured loops','Random','All structures'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
         ax_secondary[1].set_ylim(0, 1)
-        ax_secondary[1].set_xlim(-0.3,index[-1]+1)
+        ax_secondary[1].set_xlim(-0.3,5)
         
         ax_secondary[2].set_ylabel('Accuracy-Average Recall')
-        ax_secondary[2].set_xticks(index)
-        ax_secondary[2].set_xticklabels(['Helices','Sheets','Structured loops','Random'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
-        ax_secondary[2].set_xlim(-0.3,index[-1]+1)
+        ax_secondary[2].set_xticks([0,1,2,3,4])
+        ax_secondary[2].set_xticklabels(['Helices','Sheets','Structured loops','Random','All structures'], rotation=90, fontdict={'horizontalalignment': 'center', 'size':12})
+        ax_secondary[2].set_xlim(-0.3,5)
         ax_secondary[2].axhline(0,-0.3,index[-1]+1,color='k',lw=1)
         ax_secondary[2].set_ylim(minimum*1.2, maximum*1.2)
     fig_secondary.tight_layout()
