@@ -981,6 +981,7 @@ architectures = {
     "6.20": "Other non-globular",
 }
 
+# move into .txt file, no need for a special function for ts50.
 ts50 = [
     "1AHSA",
     "1BVYF",

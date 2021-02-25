@@ -1,3 +1,5 @@
+"""Functions for visualizing metrics and comparing different models"""
+
 import pandas as pd
 from benchmark import config
 import ampal
@@ -12,6 +14,7 @@ import matplotlib.patches as mpatches
 from sklearn import metrics
 import matplotlib.backends.backend_pdf
 from scipy.stats import entropy
+from typing import List
 
 
 def _annotate_ampalobj_with_data_tag(
@@ -37,10 +40,11 @@ def _annotate_ampalobj_with_data_tag(
     Returns
     -------
     ampal_structure : Assembly
-        Ampal structure with modified B-factor values.
+        Ampal structure with modified B-factor and occupancy values.
 
     Notes
     -----
+    Leo's code.
     Same as _annotate_ampalobj_with_data_tag from TIMED but can deal with missing unnatural amino acids for compatibility with EvoEF2."""
 
     assert len(tags) == len(
@@ -86,20 +90,32 @@ def _annotate_ampalobj_with_data_tag(
     return ampal_structure
 
 
-def show_accuracy(df: pd.DataFrame, pdb: str, predictions:dict, output: Path, path_to_pdbs:Path,ignore_uncommon:bool,score_sequence:bool):
+def show_accuracy(
+    df: pd.DataFrame,
+    pdb: str,
+    predictions: dict,
+    output: Path,
+    path_to_pdbs: Path,
+    ignore_uncommon: bool,
+    score_sequence: bool,
+) -> None:
     accuracy = []
     pdb_df = df[df.PDB == pdb]
-    sequence, prediction,_,_,_ = get_cath.format_sequence(pdb_df,predictions,False,ignore_uncommon,score_sequence)
+    sequence, prediction, _, _, _ = get_cath.format_sequence(
+        pdb_df, predictions, False, ignore_uncommon, score_sequence
+    )
     if not score_sequence:
         entropy_arr = entropy(prediction, base=2, axis=1)
-        prediction=list(get_cath.most_likely_sequence(prediction))
+        prediction = list(get_cath.most_likely_sequence(prediction))
     for resa, resb in zip(sequence, prediction):
-        # correct predictions are given constant score so they stand out in the figure.
-        # e.g., spectrum b, blue_white_red, maximum=6,minimum=-6 gives nice plots. Bright red shows correct predictions
-        # Red shades indicate substitutions with positive score, white=0, blue shades show substiutions with negative score.
-        # spectrum q, minimum=20.0,maximum=21.0
-        # as cartoon, cartoon putty
-        # shows nice entropy visualization.
+        """correct predictions are given constant score so they stand out in the figure.
+        e.g., spectrum b, blue_white_red, maximum=6,minimum=-6 gives nice plots. Bright red shows correct predictions
+        Red shades indicate substitutions with positive score, white=0, blue shades show substiutions with negative score.
+
+        spectrum q, minimum=20.0,maximum=21.0
+        as cartoon, cartoon putty
+        shows nice entropy visualization."""
+
         if resa == resb:
             accuracy.append(6)
         # incorrect predictions are coloured by blossum62 score.
@@ -108,18 +124,16 @@ def show_accuracy(df: pd.DataFrame, pdb: str, predictions:dict, output: Path, pa
     path_to_protein = path_to_pdbs / pdb[1:3] / f"pdb{pdb}.ent.gz"
     with gzip.open(path_to_protein, "rb") as protein:
         assembly = ampal.load_pdb(protein.read().decode(), path=False)
-    
+
     # Deals with structures from NMR as ampal returns Container of Assemblies
     if isinstance(assembly, ampal.AmpalContainer):
-        warnings.warn(
-            f"Selecting the first state from the NMR structure {assembly.id}"
-        )
+        warnings.warn(f"Selecting the first state from the NMR structure {assembly.id}")
         assembly = assembly[0]
-    #select correct chain
-    assembly=assembly[pdb_df.chain.values[0]]
+    # select correct chain
+    assembly = assembly[pdb_df.chain.values[0]]
     if not score_sequence:
         curr_annotated_structure = _annotate_ampalobj_with_data_tag(
-            assembly, [accuracy, entropy_arr], tags=["bfactor","occupancy"]
+            assembly, [accuracy, entropy_arr], tags=["bfactor", "occupancy"]
         )
     else:
         curr_annotated_structure = _annotate_ampalobj_with_data_tag(
@@ -129,9 +143,23 @@ def show_accuracy(df: pd.DataFrame, pdb: str, predictions:dict, output: Path, pa
         f.write(curr_annotated_structure.pdb)
 
 
-def ramachandran_plot(sequence: str, prediction: list, torsions: list, name: str):
-    # plots predicted and true Ramachandran plots for each amino acid. All plots are normalized by true residue count.
+def ramachandran_plot(
+    sequence: List[chr], prediction: List[chr], torsions: List[List[float]], name: str
+) -> None:
+    """Plots predicted and true Ramachandran plots for each amino acid. All plots are normalized by true residue count. Takes at least a minute to plot these, so don't plot if not neccessary.
+    Parameters
+    ----------
+    sequence: List[chr]
+        List with correctly formated (get_cath.format_format_angle_sequence()) sequence.
+    prediction: List[chr]
+        List with correctly formated predictions. Amino acid sequence, not arrays.
+    torsions: List[List[float]]
+        List wit correctly formated torsion angles.
+    name: str
+        Name and location of the figure."""
+
     fig, ax = plt.subplots(20, 3, figsize=(15, 100))
+    # get angles for each amino acids
     for k, amino_acid in enumerate(config.acids):
         predicted_angles = [
             x for x, residue in zip(torsions, prediction) if residue == amino_acid
@@ -149,6 +177,7 @@ def ramachandran_plot(sequence: str, prediction: list, torsions: list, name: str
         true_psi = [x[2] for x in true_angles if (x[2] != None) & (x[1] != None)]
         true_phi = [x[1] for x in true_angles if (x[1] != None) & (x[2] != None)]
 
+        # make a histogram and normalize by residue count
         array, xedges, yedges = [
             x
             for x in np.histogram2d(
@@ -164,13 +193,16 @@ def ramachandran_plot(sequence: str, prediction: list, torsions: list, name: str
         ]
         true_array = true_array / len(true_psi)
         difference = true_array - array
+        # get minimum and maximum counts for true and predicted sequences, use this to keep color maping in both plots identical. Easier to see overprediction.
         minimum = np.amin([array, true_array])
         maximum = np.amax([array, true_array])
         # change 0 counts to NaN to show white space.
+        # make Ramachandran plot for predictions.
         for i, rows in enumerate(array):
             for j, cols in enumerate(rows):
                 if cols == 0.0:
                     array[i][j] = np.NaN
+
         im = ax[k][0].imshow(
             array,
             interpolation="none",
@@ -189,6 +221,7 @@ def ramachandran_plot(sequence: str, prediction: list, torsions: list, name: str
         ax[k][0].set_xlabel("Phi")
         ax[k][0].set_title(f"Predicted {amino_acid}")
 
+        # Make Ramachandran plot for true sequence.
         for i, rows in enumerate(true_array):
             for j, cols in enumerate(rows):
                 if cols == 0.0:
@@ -211,6 +244,7 @@ def ramachandran_plot(sequence: str, prediction: list, torsions: list, name: str
         ax[k][1].set_xlabel("Phi")
         ax[k][1].set_title(f"True {amino_acid}")
 
+        # Make difference plots.
         for i, rows in enumerate(difference):
             for j, cols in enumerate(rows):
                 if cols == 0.0:
@@ -238,14 +272,14 @@ def ramachandran_plot(sequence: str, prediction: list, torsions: list, name: str
 
 
 def append_zero_residues(arr: np.array) -> np.array:
-    """Adds missing residue count to 0.
+    """Sets missing residue count to 0. Needed for per residue metrics plot.
     Parameters
     ----------
     arr:np.array
-        Array returned by np.unique()
+        Array returned by np.unique() with residues and their counts.
     Returns
     -------
-    np.array with added mising residue counts."""
+    np.array with added mising residues and 0 counts."""
     if len(arr[0]) != 20:
         temp_dict = {res_code: res_count for res_code, res_count in zip(arr[0], arr[1])}
         for residue in config.acids:
@@ -258,14 +292,34 @@ def append_zero_residues(arr: np.array) -> np.array:
 
 
 def make_model_summary(
-    df,
-    predictions,
-    name,
-    path_to_pdb,
-    by_fragment=True,
-    ignore_uncommon=False,
-    score_sequence=False,
-):
+    df: pd.DataFrame,
+    predictions: dict,
+    name: str,
+    path_to_pdb: Path,
+    by_fragment: bool = True,
+    ignore_uncommon: bool = False,
+    score_sequence: bool = False,
+) -> None:
+    """
+    Makes a .pdf report whith model metrics.
+    Includes prediction bias, accuracy and macro recall for each secondary structure, accuracy and recall correlation with protein resolution, confusion matrices and accuracy, recall and f1 score for each resiude.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        CATH dataframe.
+    predictions: dict
+        Dictionary with predicted sequences, key is PDB+chain.
+    name: str
+        Location of the .pdf file, also title of the plot.
+    path_to_pdb: Path
+        Path to the directory with PDB files.
+    by_fragment: bool
+        If true scores only CATH fragments, if False, scores entire chain.
+    ignore_uncommon=True
+        If True, ignores uncommon residues in accuracy calculations.
+    score_sequence=False
+        True if dictionary contains sequences, False if probability matrices(matrix shape n,20)."""
 
     fig, ax = plt.subplots(ncols=5, nrows=4, figsize=(30, 30))
     # show residue distribution and confusion matrix
@@ -286,7 +340,7 @@ def make_model_summary(
     by_residue_frame = get_cath.get_by_residue_metrics(
         sequence, prediction, score_sequence
     )
-
+    # convert probability array into list of characters.
     if not score_sequence:
         prediction = list(get_cath.most_likely_sequence(prediction))
         prediction_secondary = [
@@ -298,6 +352,7 @@ def make_model_summary(
 
     pred = append_zero_residues(np.unique(prediction, return_counts=True))
     index = np.arange(len(seq[0]))
+    # calculate prediction bias
     residue_bias = pred[1] / sum(pred[1]) - seq[1] / sum(seq[1])
     ax[2][4].bar(x=index, height=residue_bias, width=0.8, align="center")
     ax[2][4].set_ylabel("Prediction bias")
@@ -327,7 +382,6 @@ def make_model_summary(
 
     cm = metrics.confusion_matrix(sequence, prediction, labels=seq[0])
     cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
-    # ax[3][4]=sns.heatmap(cm,xticklabels=seq[0],yticklabels=seq[0],square=True,cmap="viridis")
 
     im = ax[3][4].imshow(cm, vmin=0, vmax=1)
     ax[3][4].set_xlabel("Predicted")
@@ -339,6 +393,7 @@ def make_model_summary(
     # Plot Color Bar:
     fig.colorbar(im, ax=ax[3][4], fraction=0.046)
 
+    # plot confusion matrix for each secondary structrue type.
     ss_names = ["Helices", "Sheets", "Structured loops", "Random"]
     for i, ss in enumerate(ss_names):
         seq = append_zero_residues(np.unique(true_secondary[i], return_counts=True))
@@ -373,8 +428,6 @@ def make_model_summary(
             true_secondary[i], prediction_secondary[i], labels=seq[0]
         )
         cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
-        # plt.sca(ax[3][i])
-        # sns.heatmap(cm,xticklabels=seq[0],yticklabels=seq[0],square=True,cmap="viridis")
         im = ax[3][i].imshow(cm, vmin=0, vmax=1)
         ax[3][i].set_xlabel("Predicted")
         ax[3][i].set_xticks(range(20))
@@ -392,7 +445,6 @@ def make_model_summary(
         df, predictions, by_fragment, ignore_uncommon, score_sequence
     )
     ax[0][0].bar(x=index, height=accuracy, width=0.8, align="center")
-    # ax[0][0].bar(x=5, height=general_info['similarity'], width=0.8, align='center')
 
     # show top three accuracy
     if not score_sequence:
@@ -400,6 +452,7 @@ def make_model_summary(
         ax[0][0].vlines(x=index, ymin=0, ymax=top_three, linewidth=2)
         # show recall
     ax[0][1].bar(x=index, height=recall, width=0.8, align="center")
+    # add values to the plot
     for e, value in enumerate(accuracy):
         ax[0][0].text(
             index[e],
@@ -437,7 +490,7 @@ def make_model_summary(
             va="bottom",
             rotation="vertical",
         )
-    # Title, Label, Ticks and Ylim
+    # Title, label, ticks and limits
     ax[0][0].set_ylabel("Accuracy")
     ax[0][0].set_xticks(index)
     ax[0][0].set_xticklabels(
@@ -469,11 +522,11 @@ def make_model_summary(
     ax[0][2].axhline(0, -0.3, index[-1] + 1, color="k", lw=1)
     ax[0][2].set_ylim(minimum * 1.2, maximum * 1.2)
 
-    # show resolution distribution
     colors = sns.color_palette("viridis", 4)
-    # combine class 4 and 6 to simplify the graph
+    # combine classes 4 and 6 to simplify the graph
     colors = {1: colors[0], 2: colors[1], 3: colors[2], 4: colors[3], 6: colors[3]}
     class_color = [colors[x] for x in df["class"].values]
+    # show accuracy and macro recall resolution distribution
     accuracy, recall = get_cath.score_each(
         df,
         predictions,
@@ -482,8 +535,10 @@ def make_model_summary(
         by_fragment=by_fragment,
     )
     resolution = get_cath.get_resolution(df, path_to_pdb)
+    # calculate Pearson correlation between accuracy/recall and resolution.
     corr = pd.DataFrame({0: resolution, 1: recall, 2: accuracy}).corr().to_numpy()
     ax[0][3].scatter(resolution, accuracy, color=class_color, alpha=0.7)
+    # Title, label, ticks and limits
     ax[0][3].set_xlabel("Resolution, A")
     ax[0][3].set_ylabel("Accuracy")
     ax[0][3].set_title(f"Pearson correlation: {corr[0][2]:.3f}")
@@ -491,6 +546,7 @@ def make_model_summary(
     ax[0][4].set_title(f"Pearson correlation: {corr[0][1]:.3f}")
     ax[0][4].set_ylabel("Average recall")
     ax[0][4].set_xlabel("Resolution, A")
+    # make a legend
     patches = [
         mpatches.Patch(color=colors[x], label=config.classes[x]) for x in config.classes
     ]
@@ -502,15 +558,18 @@ def make_model_summary(
     ax[1][0].bar(by_residue_frame.index, by_residue_frame.entropy)
     ax[1][0].set_ylabel("Entropy")
     ax[1][0].set_xlabel("Amino acids")
-    # show recall,precision and f1
+
+    # make one big subplot
     for a in ax[1, 1:]:
         a.remove()
     ax_right = fig.add_subplot(gs[1, 1:])
     index = np.arange(len(by_residue_frame.index))
+    # show recall,precision and f1
     for i, metric in enumerate(["recall", "precision", "f1"]):
         ax_right.bar(
             index + i * 0.3, height=by_residue_frame[metric], width=0.3, label=metric
         )
+        # add values to the plot
         for j, value in enumerate(by_residue_frame[metric]):
             ax_right.text(
                 index[j] + i * 0.3,
@@ -536,12 +595,32 @@ def make_model_summary(
 
 def compare_model_accuracy(
     df: pd.DataFrame,
-    model_scores: list,
-    model_labels: list,
+    model_scores: List[dict],
+    model_labels: List[str],
     location: Path,
     ignore_uncommon: bool,
+    by_fragment: bool,
+) -> None:
+    """
+    Compares all the models in model_scores.
+    .pdf report contains accuracy, macro average and similarity scores for each CATH architecture and secondary structure type.
+
+    Parameters
+    ----------
+
+    df: pd.DataFrame
+        CATH dataframe.
+    model_scores: List[dict]
+        List with dictionary with predicted sequences.
+    model_labels: List[str]
+        List with model names corresponding to dictionaries in model_scores.
+    location:Path
+        Location where to store the .pdf file.
     by_fragment: bool
-):
+        If true scores only CATH fragments, if False, scores entire chain.
+    ignore_uncommon=True
+        If True, ignores uncommon residues in accuracy calculations."""
+
     models = []
     for model, label in zip(model_scores, model_labels):
         if label != "EvoEF2":
@@ -564,15 +643,17 @@ def compare_model_accuracy(
                 )
             )
 
+    # Plot CATH architectures
     minimum = 0
     maximum = 0
     colors = sns.color_palette()
-    # combine 4 and 6 to make plots nicer. Works with any number of CATH classes.
+    # combine classes 4 and 6 to make plots nicer. Works with any number of CATH classes.
     class_key = [x[0] for x in models[0].index]
     class_key = list(dict.fromkeys(class_key))
     if 4 in class_key and 6 in class_key:
         class_key = [x for x in class_key if x != 4 and x != 6]
         class_key.append([4, 6])
+    # calculate subplot ratios so that classes with more architectures have more space.
     ratios = [models[0].loc[class_key[i]].shape[0] for i in range(len(class_key))]
     fig, ax = plt.subplots(
         5,
@@ -587,7 +668,7 @@ def compare_model_accuracy(
             value_accuracy = frame.loc[class_key[i]].accuracy.values
             value_recall = frame.loc[class_key[i]].recall.values
             value_similarity = frame.loc[class_key[i]].similarity.values
-
+            # show accuracy
             ax[0][i].bar(
                 x=index + j * 0.1,
                 height=value_accuracy,
@@ -606,7 +687,7 @@ def compare_model_accuracy(
                     rotation="vertical",
                     fontdict={"size": 7},
                 )
-
+            # show recall
             ax[1][i].bar(
                 x=index + j * 0.1,
                 height=value_recall,
@@ -642,7 +723,7 @@ def compare_model_accuracy(
                     color=colors[j],
                     linewidth=2,
                 )
-
+            # show similarity scores
             ax[2][i].bar(
                 x=index + j * 0.1,
                 height=value_similarity,
@@ -660,7 +741,7 @@ def compare_model_accuracy(
                     rotation="vertical",
                     fontdict={"size": 7},
                 )
-
+            # show accuracy-macro recall
             difference = value_accuracy - value_recall
             if np.amin(difference) < minimum:
                 minimum = np.amin(difference)
@@ -729,7 +810,7 @@ def compare_model_accuracy(
         )
         ax[3][i].hlines(0, -0.3, index[-1] + 1, colors="k", lw=1)
         ax[3][i].set_xlim(-0.3, index[-1] + 1)
-    # scale axis so that they are equal to get nice graph
+    # Make yaxis in difference plots equal to get a nice graph.
     for x in range(len(ax[3])):
         ax[3][x].set_ylim(minimum * 1.2, maximum * 1.2)
     handles, labels = ax[0][0].get_legend_handles_labels()
@@ -738,14 +819,13 @@ def compare_model_accuracy(
     for x in range(1, len(class_key)):
         ax[4][x].remove()
     fig.tight_layout()
-    # plot secondary structures
+
+    # Plot secondary structures
     maximum = 0
     minimum = 0
     fig_secondary, ax_secondary = plt.subplots(2, 2, figsize=(12 * len(class_key), 10))
-    keys = ["alpha", "beta", "loops", "random"]
     index = np.array([0, 1, 2, 3, 4])
     for j, model in enumerate(model_scores):
-        # show accuracy
         if model_labels[j] != "EvoEF2":
             accuracy, top_three, similarity, recall = get_cath.score(
                 df, model, by_fragment, ignore_uncommon
@@ -758,7 +838,7 @@ def compare_model_accuracy(
                 ignore_uncommon=True,
                 score_sequence=True,
             )
-
+        # show accuracy
         ax_secondary[0][0].bar(
             x=index + j * 0.1,
             height=accuracy,
@@ -784,6 +864,7 @@ def compare_model_accuracy(
             color=colors[j],
             label=model_labels[j],
         )
+        # show similarity score
         ax_secondary[1][1].bar(
             x=index + j * 0.1,
             height=similarity,
@@ -792,6 +873,7 @@ def compare_model_accuracy(
             color=colors[j],
             label=model_labels[j],
         )
+        # add values to the plot
         for e, value in enumerate(accuracy):
             ax_secondary[0][0].text(
                 index[e] + j * 0.1,
@@ -849,7 +931,7 @@ def compare_model_accuracy(
                 rotation="vertical",
                 fontdict={"size": 6},
             )
-        # Title, Label, Ticks and Ylim
+        # Title, labels, ticks and limits
         fig_secondary.suptitle("Secondary structure", fontdict={"size": 22})
         ax_secondary[0][0].set_ylabel("Accuracy")
         ax_secondary[0][0].set_xticks([0, 1, 2, 3, 4])
@@ -859,6 +941,7 @@ def compare_model_accuracy(
             fontdict={"horizontalalignment": "center", "size": 12},
         )
         ax_secondary[0][0].set_ylim(0, 1)
+        # leave some space from the sides to make it look nicer.
         ax_secondary[0][0].set_xlim(-0.3, 5)
 
         ax_secondary[0][1].set_ylabel("Average Recall")
@@ -890,6 +973,7 @@ def compare_model_accuracy(
         )
         ax_secondary[1][0].set_xlim(-0.3, 5)
         ax_secondary[1][0].axhline(0, -0.3, index[-1] + 1, color="k", lw=1)
+        # make y axis in difference plots equal to get nicer graphs.
         ax_secondary[1][0].set_ylim(minimum * 1.2, maximum * 1.2)
     fig_secondary.tight_layout()
 
