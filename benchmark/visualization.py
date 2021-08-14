@@ -258,8 +258,8 @@ def ramachandran_plot(
         ax[k][1].set_ylim(-180, 180)
         ax[k][1].set_xticks(np.arange(-180, 220, 40))
         ax[k][1].set_yticks(np.arange(-180, 220, 40))
-        ax[k][1].set_ylabel("Psi")
-        ax[k][1].set_xlabel("Phi")
+        ax[k][1].set_ylabel("Psi", fontsize=20)
+        ax[k][1].set_xlabel("Phi", fontsize=20)
         ax[k][1].set_title(f"True {amino_acid}")
 
         # Make difference plots.
@@ -281,8 +281,8 @@ def ramachandran_plot(
         ax[k][2].set_ylim(-180, 180)
         ax[k][2].set_xticks(np.arange(-180, 220, 40))
         ax[k][2].set_yticks(np.arange(-180, 220, 40))
-        ax[k][2].set_ylabel("Psi")
-        ax[k][2].set_xlabel("Phi")
+        ax[k][2].set_ylabel("Psi", fontsize=20)
+        ax[k][2].set_xlabel("Phi", fontsize=20)
         ax[k][2].set_title(f"True-Predicted {amino_acid}")
 
     plt.tight_layout()
@@ -404,7 +404,7 @@ def make_model_summary(
     ax[4][4].set_xticks(range(20))
     ax[4][4].set_xticklabels(config.acids,  fontsize=18)
     ax[4][4].set_ylabel("True",  fontsize=20)
-    ax[4][4].set_yticks(range(20),  fontsize=20)
+    ax[4][4].set_yticks(range(20))
     ax[4][4].set_yticklabels(config.acids, fontsize=18)
     # Plot Color Bar:
     fig.colorbar(im, ax=ax[4][4], fraction=0.046)
