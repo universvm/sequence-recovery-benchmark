@@ -17,6 +17,9 @@ from scipy.stats import entropy
 from typing import List
 from benchmark import version
 from scipy.stats import pearsonr
+import matplotlib as mpl
+mpl.rc("savefig", dpi=300)
+
 
 def _annotate_ampalobj_with_data_tag(
     ampal_structure,
@@ -368,8 +371,8 @@ def make_model_summary(
     #keep max bias to scale all graphs
     max_bias=max(residue_bias)
     ax[3][4].bar(x=index, height=residue_bias, width=0.8, align="center")
-    ax[3][4].set_ylabel("Prediction bias")
-    ax[3][4].set_xlabel("Amino acids")
+    ax[3][4].set_ylabel("Prediction bias",  fontsize=20)
+    ax[3][4].set_xlabel("Amino acids",  fontsize=20)
     for e, dif in enumerate(residue_bias):
         if dif < 0:
             y_coord = 0
@@ -386,23 +389,23 @@ def make_model_summary(
 
     ax[3][4].set_xticks(index)
     ax[3][4].set_xticklabels(
-        pred[0], fontdict={"horizontalalignment": "center", "size": 12}
+        pred[0], fontdict={"horizontalalignment": "center", "size": 18}
     )
-    ax[3][4].set_ylabel("Prediction bias")
-    ax[3][4].set_xlabel("Amino acids")
-    ax[3][4].set_title("All structures")
+    ax[3][4].set_ylabel("Prediction bias" ,  fontsize=20)
+    ax[3][4].set_xlabel("Amino acids",  fontsize=20)
+    ax[3][4].set_title("All structures",  fontsize=20)
     ax[3][4].set_ylim(top=1.0)
 
     cm = metrics.confusion_matrix(sequence, prediction, labels=seq[0])
     cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
 
     im = ax[4][4].imshow(cm, vmin=0, vmax=1)
-    ax[4][4].set_xlabel("Predicted")
+    ax[4][4].set_xlabel("Predicted",  fontsize=20)
     ax[4][4].set_xticks(range(20))
-    ax[4][4].set_xticklabels(config.acids)
-    ax[4][4].set_ylabel("True")
-    ax[4][4].set_yticks(range(20))
-    ax[4][4].set_yticklabels(config.acids)
+    ax[4][4].set_xticklabels(config.acids,  fontsize=18)
+    ax[4][4].set_ylabel("True",  fontsize=20)
+    ax[4][4].set_yticks(range(20),  fontsize=20)
+    ax[4][4].set_yticklabels(config.acids, fontsize=18)
     # Plot Color Bar:
     fig.colorbar(im, ax=ax[4][4], fraction=0.046)
 
@@ -419,11 +422,11 @@ def make_model_summary(
         ax[3][i].bar(x=index, height=residue_bias, width=0.8, align="center")
         ax[3][i].set_xticks(index)
         ax[3][i].set_xticklabels(
-            pred[0], fontdict={"horizontalalignment": "center", "size": 12}
+            pred[0], fontdict={"horizontalalignment": "center", "size": 18}
         )
-        ax[3][i].set_ylabel("Prediction bias")
-        ax[3][i].set_xlabel("Amino acids")
-        ax[3][i].set_title(ss)
+        ax[3][i].set_ylabel("Prediction bias", fontsize=20)
+        ax[3][i].set_xlabel("Amino acids", fontsize=20)
+        ax[3][i].set_title(ss, fontsize=18)
         ax[3][i].set_ylim(top=1.0)
         for e, dif in enumerate(residue_bias):
             if dif < 0:
@@ -444,10 +447,10 @@ def make_model_summary(
         )
         cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
         im = ax[4][i].imshow(cm, vmin=0, vmax=1)
-        ax[4][i].set_xlabel("Predicted")
+        ax[4][i].set_xlabel("Predicted", fontsize=20)
         ax[4][i].set_xticks(range(20))
         ax[4][i].set_xticklabels(config.acids)
-        ax[4][i].set_ylabel("True")
+        ax[4][i].set_ylabel("True", fontsize=20)
         ax[4][i].set_yticks(range(20))
         ax[4][i].set_yticklabels(config.acids)
         # Plot Color Bar:
@@ -540,7 +543,7 @@ def make_model_summary(
             rotation="vertical",
         )
     # Title, label, ticks and limits
-    ax[0][0].set_ylabel("Accuracy")
+    ax[0][0].set_ylabel("Accuracy", fontsize=20)
     ax[0][0].set_xticks(index)
     ax[0][0].set_xticklabels(
         ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
@@ -550,7 +553,7 @@ def make_model_summary(
     ax[0][0].set_ylim(0, 1)
     ax[0][0].set_xlim(-0.7, index[-1] + 1)
 
-    ax[0][1].set_ylabel("Macro-recall")
+    ax[0][1].set_ylabel("Macro-recall", fontsize=20)
     ax[0][1].set_xticks(index)
     ax[0][1].set_xticklabels(
         ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
@@ -560,33 +563,33 @@ def make_model_summary(
     ax[0][1].set_ylim(0, 1)
     ax[0][1].set_xlim(-0.7, index[-1] + 1)
 
-    ax[0][2].set_ylabel("Accuracy-Macro-recalls")
+    ax[0][2].set_ylabel("Accuracy-Macro-recalls", fontsize=20)
     ax[0][2].set_xticks(index)
     ax[0][2].set_xticklabels(
         ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
         rotation=90,
-        fontdict={"horizontalalignment": "center", "size": 12},
+        fontdict={"horizontalalignment": "center", "size": 15},
     )
     ax[0][2].set_xlim(-0.7, index[-1] + 1)
     ax[0][2].axhline(0, -0.3, index[-1] + 1, color="k", lw=1)
     ax[0][2].set_ylim(ymax=maximum * 1.2)
 
-    ax[0][3].set_ylabel("Average precision")
+    ax[0][3].set_ylabel("Average precision", fontsize=20)
     ax[0][3].set_xticks(index)
     ax[0][3].set_xticklabels(
         ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
         rotation=90,
-        fontdict={"horizontalalignment": "center", "size": 12},
+        fontdict={"horizontalalignment": "center", "size": 15},
     )
     ax[0][3].set_ylim(0, 1)
     ax[0][3].set_xlim(-0.7, index[-1] + 1)
 
-    ax[0][4].set_ylabel("Similarity")
+    ax[0][4].set_ylabel("Similarity", fontsize=20)
     ax[0][4].set_xticks(index)
     ax[0][4].set_xticklabels(
         ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
         rotation=90,
-        fontdict={"horizontalalignment": "center", "size": 12},
+        fontdict={"horizontalalignment": "center", "size": 15},
     )
     ax[0][4].set_ylim(0, 1)
     ax[0][4].set_xlim(-0.7, index[-1] + 1)
@@ -615,15 +618,15 @@ def make_model_summary(
         ax[1][3].plot(res_df['res'], m*res_df['res'] + b, color='r')
         ax[1][3].scatter(resolution, accuracy, color=class_color, alpha=0.7)
         # Title, label, ticks and limits
-        ax[1][3].set_xlabel("Resolution, A")
-        ax[1][3].set_ylabel("Accuracy")
-        ax[1][3].set_title(f"Pearson correlation: {corr[0][2]:.3f}")
+        ax[1][3].set_xlabel("Resolution, $\AA$", fontsize=20)
+        ax[1][3].set_ylabel("Accuracy", fontsize=20)
+        ax[1][3].set_title(f"Pearson correlation: {corr[0][2]:.3f}", fontsize=15)
         m, b = np.polyfit(res_df['res'], res_df['recall'], 1)
         ax[1][4].plot(res_df['res'], m*res_df['res'] + b, color='r')
         ax[1][4].scatter(resolution, recall, color=class_color, alpha=0.7)
-        ax[1][4].set_title(f"Pearson correlation: {corr[0][1]:.3f}")
-        ax[1][4].set_ylabel("Macro-recall")
-        ax[1][4].set_xlabel("Resolution, A")
+        ax[1][4].set_title(f"Pearson correlation: {corr[0][1]:.3f}", fontsize=15)
+        ax[1][4].set_ylabel("Macro-recall", fontsize=20)
+        ax[1][4].set_xlabel("Resolution, $\AA$", fontsize=20)
         # make a legend
         patches = [
             mpatches.Patch(color=colors[x], label=config.classes[x]) for x in config.classes
@@ -635,8 +638,8 @@ def make_model_summary(
     gs = ax[0, 0].get_gridspec()
     # show per residue entropy
     ax[2][0].bar(by_residue_frame.index, by_residue_frame.entropy)
-    ax[2][0].set_ylabel("Entropy")
-    ax[2][0].set_xlabel("Amino acids")
+    ax[2][0].set_ylabel("Entropy", fontsize=20)
+    ax[2][0].set_xlabel("Amino acids", fontsize=20)
 
     # make one big subplot
     for a in ax[2, 1:]:
@@ -661,15 +664,15 @@ def make_model_summary(
     ax_right.legend()
     ax_right.set_xticks(index + 0.3)
     ax_right.set_xticklabels(
-        by_residue_frame.index, fontdict={"horizontalalignment": "center", "size": 12}
+        by_residue_frame.index, fontdict={"horizontalalignment": "center", "size": 15}
     )
     ax_right.set_xlim(index[0] - 0.3, index[-1] + 1)
     ax_right.set_ylim(0, 1)
 
     #show auc values
     ax[1][0].bar(by_residue_frame.index, by_residue_frame.auc)
-    ax[1][0].set_ylabel("AUC")
-    ax[1][0].set_xlabel("Amino acids")
+    ax[1][0].set_ylabel("AUC", fontsize=20)
+    ax[1][0].set_xlabel("Amino acids", fontsize=20)
     #Remove empty subplots.
     ax[1][1].remove()
     ax[1][2].remove()
@@ -865,15 +868,15 @@ def compare_model_accuracy(
         ax[1][i].set_title(config.classes[i + 1], fontdict={"size": 22})
         ax[2][i].set_title(config.classes[i + 1], fontdict={"size": 22})
         ax[3][i].set_title(config.classes[i + 1], fontdict={"size": 22})
-        ax[0][i].set_ylabel("Accuracy")
-        ax[1][i].set_ylabel("Macro-recall")
-        ax[2][i].set_ylabel("Similarity")
-        ax[3][i].set_ylabel("Accuracy-MacroRecall")
+        ax[0][i].set_ylabel("Accuracy", fontsize=20)
+        ax[1][i].set_ylabel("Macro-recall", fontsize=20)
+        ax[2][i].set_ylabel("Similarity", fontsize=20)
+        ax[3][i].set_ylabel("Accuracy-MacroRecall", fontsize=20)
         ax[0][i].set_xticks(index)
         ax[0][i].set_xticklabels(
             frame.loc[class_key[i]].name,
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax[0][i].set_ylim(0, 1)
         ax[0][i].set_xlim(-0.3, index[-1] + 1)
@@ -881,7 +884,7 @@ def compare_model_accuracy(
         ax[1][i].set_xticklabels(
             frame.loc[class_key[i]].name,
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax[1][i].set_ylim(0, 1)
         ax[1][i].set_xlim(-0.3, index[-1] + 1)
@@ -889,7 +892,7 @@ def compare_model_accuracy(
         ax[2][i].set_xticklabels(
             frame.loc[class_key[i]].name,
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax[2][i].set_ylim(0, 1)
         ax[2][i].set_xlim(-0.3, index[-1] + 1)
@@ -897,7 +900,7 @@ def compare_model_accuracy(
         ax[3][i].set_xticklabels(
             frame.loc[class_key[i]].name,
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax[3][i].hlines(0, -0.3, index[-1] + 1, colors="k", lw=1)
         ax[3][i].set_xlim(-0.3, index[-1] + 1)
@@ -1028,43 +1031,43 @@ def compare_model_accuracy(
             )
         # Title, labels, ticks and limits
         fig_secondary.suptitle("Secondary structure", fontdict={"size": 22})
-        ax_secondary[0][0].set_ylabel("Accuracy")
+        ax_secondary[0][0].set_ylabel("Accuracy", fontsize=20)
         ax_secondary[0][0].set_xticks([0, 1, 2, 3, 4])
         ax_secondary[0][0].set_xticklabels(
             ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax_secondary[0][0].set_ylim(0, 1)
         # leave some space from the sides to make it look nicer.
         ax_secondary[0][0].set_xlim(-0.3, 5)
 
-        ax_secondary[0][1].set_ylabel("Macro-recalls")
+        ax_secondary[0][1].set_ylabel("Macro-recalls", fontsize=20)
         ax_secondary[0][1].set_xticks([0, 1, 2, 3, 4])
         ax_secondary[0][1].set_xticklabels(
             ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax_secondary[0][1].set_ylim(0, 1)
         ax_secondary[0][1].set_xlim(-0.3, 5)
 
-        ax_secondary[1][1].set_ylabel("Similarity")
+        ax_secondary[1][1].set_ylabel("Similarity", fontsize=20)
         ax_secondary[1][1].set_xticks([0, 1, 2, 3, 4])
         ax_secondary[1][1].set_xticklabels(
             ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax_secondary[1][1].set_ylim(0, 1)
         ax_secondary[1][1].set_xlim(-0.3, 5)
 
-        ax_secondary[1][0].set_ylabel("Accuracy-Macro-recalls")
+        ax_secondary[1][0].set_ylabel("Accuracy-Macro-recall", fontsize=20)
         ax_secondary[1][0].set_xticks([0, 1, 2, 3, 4])
         ax_secondary[1][0].set_xticklabels(
             ["All structures", "Helices", "Sheets", "Structured loops", "Random"],
             rotation=90,
-            fontdict={"horizontalalignment": "center", "size": 12},
+            fontdict={"horizontalalignment": "center", "size": 15},
         )
         ax_secondary[1][0].set_xlim(-0.3, 5)
         ax_secondary[1][0].axhline(0, -0.3, index[-1] + 1, color="k", lw=1)
@@ -1078,9 +1081,9 @@ def compare_model_accuracy(
     corr=cov.corr().to_numpy()
     im = ax_corr.imshow(corr)
     ax_corr.set_yticks(range(len(models)))
-    ax_corr.set_yticklabels(model_labels)
+    ax_corr.set_yticklabels(model_labels, fontsize=15)
     ax_corr.set_xticks(range(len(models)))
-    ax_corr.set_xticklabels(model_labels)
+    ax_corr.set_xticklabels(model_labels, fontsize=15)
     fig_corr.colorbar(im, ax=ax_corr, fraction=0.046)
     #add text
     for i in range(len(models)):
