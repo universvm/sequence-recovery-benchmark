@@ -336,6 +336,8 @@ def make_model_summary(
     """
     
     fig, ax = plt.subplots(ncols=5, nrows=5, figsize=(30, 40))
+    plt.xticks(fontsize=16)
+    plt.xticks(fontsize=16)
     #print version
     plt.figtext(0.1, 0.99,s='Version: '+version.__version__,figure=fig,fontdict={"size": 12})
     # show residue distribution and confusion matrix
@@ -402,10 +404,10 @@ def make_model_summary(
     im = ax[4][4].imshow(cm, vmin=0, vmax=1)
     ax[4][4].set_xlabel("Predicted",  fontsize=20)
     ax[4][4].set_xticks(range(20))
-    ax[4][4].set_xticklabels(config.acids,  fontsize=18)
+    ax[4][4].set_xticklabels(config.acids, fontsize=15)
     ax[4][4].set_ylabel("True",  fontsize=20)
     ax[4][4].set_yticks(range(20))
-    ax[4][4].set_yticklabels(config.acids, fontsize=18)
+    ax[4][4].set_yticklabels(config.acids, fontsize=15)
     # Plot Color Bar:
     fig.colorbar(im, ax=ax[4][4], fraction=0.046)
 
@@ -447,18 +449,18 @@ def make_model_summary(
         )
         cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
         im = ax[4][i].imshow(cm, vmin=0, vmax=1)
-        ax[4][i].set_xlabel("Predicted", fontsize=20)
+        ax[4][i].set_xlabel("Predicted", fontsize=15)
         ax[4][i].set_xticks(range(20))
-        ax[4][i].set_xticklabels(config.acids)
-        ax[4][i].set_ylabel("True", fontsize=20)
+        ax[4][i].set_xticklabels(config.acids, fontsize=15)
+        ax[4][i].set_ylabel("True", fontsize=15)
         ax[4][i].set_yticks(range(20))
-        ax[4][i].set_yticklabels(config.acids)
+        ax[4][i].set_yticklabels(config.acids, fontsize=15)
         # Plot Color Bar:
         fig.colorbar(im, ax=ax[4][i], fraction=0.046)
     
     #scale all bias plots so that they have the same y-axis.
     for i in range(5):
-        ax[3][i].set_ylim(ymax=max_bias*1.1)
+        ax[3][i].set_ylim(ymax=0.3)
 
     # show accuracy,recall,similarity, precision and top3
     index = np.array([0, 1, 2, 3, 4])
@@ -672,6 +674,7 @@ def make_model_summary(
     #show auc values
     ax[1][0].bar(by_residue_frame.index, by_residue_frame.auc)
     ax[1][0].set_ylabel("AUC", fontsize=20)
+    ax[1][0].set_ylim(0, 1)
     ax[1][0].set_xlabel("Amino acids", fontsize=20)
     #Remove empty subplots.
     ax[1][1].remove()
